@@ -1,0 +1,16 @@
+# Configuracion de Netlify para el frontend (Vite SPA).
+#
+# IMPORTANTE: en Netlify, configura la "Base directory" = frontend
+# (este archivo, el package.json y el codigo viven en la carpeta frontend/).
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# SPA fallback: la app usa React Router (rutas del lado del cliente), asi que
+# TODAS las rutas deben servir index.html. Sin esto, recargar /pedidos o /usuarios
+# daria un 404 en el servidor de Netlify.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

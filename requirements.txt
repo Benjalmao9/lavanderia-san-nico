@@ -1,0 +1,33 @@
+# Dependencias del proyecto (versiones fijadas / pinned).
+# Instalar con:  pip install -r requirements.txt
+#
+# Archivo en ASCII puro (sin acentos ni simbolos especiales) a proposito, para
+# que pip lo lea bien en cualquier sistema/codificacion (Windows incluido).
+#
+# IMPORTANTE: bcrypt esta fijado en 4.0.1 a proposito. passlib 1.7.4 se ROMPE
+# con bcrypt 4.1+/5.x (el hashing de contrasenas deja de funcionar). No subas
+# bcrypt mientras uses passlib 1.7.4.
+
+fastapi==0.138.1
+uvicorn==0.49.0
+SQLAlchemy==2.0.51
+pydantic==2.13.4
+PyMySQL==1.2.0
+python-dotenv==1.2.2
+passlib==1.7.4
+bcrypt==4.0.1
+
+# Autenticacion con JWT:
+#  - python-jose[cryptography]: crear y verificar los tokens JWT (firma HS256).
+#  - python-multipart: lo necesita FastAPI para leer el formulario del login.
+python-jose[cryptography]==3.5.0
+python-multipart==0.0.32
+
+# cryptography: backend criptografico real con el que python-jose firma/verifica
+# los HS256 (lo arrastra el extra [cryptography]). Lo fijamos explicito para que
+# la pieza mas sensible del login quede versionada y los builds sean reproducibles.
+cryptography==49.0.0
+
+# slowapi: limitador de peticiones (rate limiting) para FastAPI/Starlette. Lo
+# usamos en POST /login para frenar ataques de fuerza bruta de contrasenas.
+slowapi==0.1.9

@@ -1,0 +1,12 @@
+# Dependencias instaladas (se regeneran con npm install).
+node_modules
+
+# Resultado del build de producción.
+dist
+
+# Logs y archivos locales.
+*.log
+*.local
+
+# Variables de entorno locales (las VITE_ son públicas, pero por convención).
+.env.local

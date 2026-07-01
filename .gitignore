@@ -1,0 +1,29 @@
+# Variables de entorno con credenciales (¡nunca subir a Git!)
+.env
+
+# Archivos internos/locales de Claude Code (permisos, config local de sesión).
+# No son documentación del proyecto: son notas/config de la herramienta.
+.claude/
+CLAUDE.md
+
+# Cachés y archivos compilados de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# Archivos de configuración de editores / IDEs
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
