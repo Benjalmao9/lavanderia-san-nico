@@ -21,6 +21,7 @@
 # ============================================================
 
 import logging
+from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -95,6 +96,53 @@ def obtener_usuario_actual(
             detail="El usuario del token ya no existe",
             headers=cabecera_bearer,
         )
+
+    # ------------------------------------------------------------------
+    # 4) SESIONES FORZADAMENTE CERRADAS: un JWT no se puede "revocar" a mitad
+    #    de camino (es autocontenido: su sola firma alcanza para validarlo, sin
+    #    consultar ninguna lista de tokens vigentes). La forma de lograr el
+    #    mismo efecto es una marca de tiempo por usuario (sesion_valida_desde,
+    #    ver models.py y la explicación grande en seguridad.py:crear_token_
+    #    acceso): si NO es NULL, cualquier token con 'iat' (instante en que se
+    #    emitió) ANTERIOR a esa marca quedó invalidado, aunque su firma siga
+    #    siendo válida y todavía no haya expirado. Aprovechamos que esta
+    #    función YA consulta la fila del usuario en la BD (la fuente de verdad
+    #    de su rol, etc.) para sumar esta comparación sin una consulta extra.
+    if usuario.sesion_valida_desde is not None:
+        iat = carga.get("iat")
+        # iat viaja como entero (segundos desde época UNIX en UTC, SIN fracción:
+        # el estándar JWT y python-jose truncan 'iat' al segundo entero al
+        # firmar). Lo reconstruimos como datetime "naive-UTC" para compararlo con
+        # sesion_valida_desde (guardada con microsegundos completos, ver models.py).
+        iat_valido = isinstance(iat, (int, float))
+        if iat_valido:
+            iat_dt = datetime.fromtimestamp(iat, tz=timezone.utc).replace(tzinfo=None)
+        # Si el token no trae 'iat' (no debería pasar con los que emite esta
+        # app, pero sí podría con un token viejo de antes de este cambio) no
+        # podemos demostrar que se emitió DESPUÉS del cierre de sesión: por las
+        # dudas, lo tratamos como inválido (fail-safe: ante la duda, exigimos
+        # volver a loguearse en vez de arriesgarnos a dejar pasar una sesión
+        # que debería estar cerrada).
+        #
+        # ¿POR QUÉ "<=" Y NO "<"? Como 'iat' pierde su fracción de segundo (ver
+        # arriba), un login y un cierre de sesión que caigan en el MISMO segundo
+        # de reloj podrían compararse como "iguales" del lado del token. Con "<"
+        # estricto, ese empate se leería como "el token es posterior" y LO
+        # DEJARÍA PASAR, aunque en la realidad (con microsegundos) el login haya
+        # sido antes del cierre: exactamente el hueco de seguridad que este
+        # chequeo existe para tapar. Con "<=" el empate se resuelve del lado
+        # seguro (se rechaza). El costo es simétrico pero mucho menos grave: en
+        # el caso límite de volver a loguearse en el MISMISIMO segundo en que un
+        # admin cierra esa sesión, ese login nuevo también podría rechazarse una
+        # vez, y bastaría con reintentarlo (un segundo después dejará de
+        # coincidir). Preferimos ese costo mínimo y autocorregible antes que
+        # dejar un hueco de seguridad real.
+        if not iat_valido or iat_dt <= usuario.sesion_valida_desde:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Tu sesión fue cerrada. Inicia sesión de nuevo.",
+                headers=cabecera_bearer,
+            )
 
     return usuario
 

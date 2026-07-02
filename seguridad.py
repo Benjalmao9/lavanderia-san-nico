@@ -186,20 +186,46 @@ def validar_configuracion_jwt() -> None:
     """Valida la configuración JWT de forma explícita.
 
     La aplicación la llama al arrancar (ver main.py) para fallar de forma
-    ruidosa y temprana si la clave no está bien configurada, en vez de
-    descubrirlo recién en el primer intento de login.
+    ruidosa y temprana si algo está mal configurado (la clave secreta o las
+    horas de expiración), en vez de descubrirlo recién en el primer intento de
+    login (que hoy en día crea AMBOS: el token con su 'iat' y su 'exp').
     """
     _obtener_clave_secreta()
+    _obtener_horas_expiracion()
 
 # Algoritmo de firma. HS256 = HMAC con SHA-256: firma simétrica (la MISMA
 # clave secreta firma y verifica). Es el estándar simple y seguro cuando el
 # mismo servidor emite y valida los tokens (nuestro caso).
 JWT_ALGORITHM = "HS256"
 
-# Tiempo de vida del token: 6 horas. Pasado ese plazo, el token expira y el
-# usuario debe volver a iniciar sesión. Un plazo acotado limita el daño si
-# un token se filtra (deja de servir solo).
-JWT_HORAS_EXPIRACION = 6
+# ------------------------------------------------------------
+#  Tiempo de vida del token, configurable por variable de entorno
+#  JWT_EXPIRE_HOURS (por defecto 2 horas; antes eran 6 horas fijas en el
+#  código). Pasado ese plazo, el token expira y el usuario debe volver a
+#  iniciar sesión. Un plazo acotado limita el daño si un token se filtra
+#  (deja de servir solo), y dejarlo configurable permite ajustar ese balance
+#  seguridad/comodidad sin tocar código (p. ej. acortarlo más en producción).
+#
+#  La lectura es PEREZOSA (se valida al CREAR un token, no al importar este
+#  módulo), por el mismo motivo que _obtener_clave_secreta: así un valor mal
+#  puesto en JWT_EXPIRE_HOURS no rompe el import de quien solo necesita el
+#  hashing de contraseñas (p. ej. crear_admin.py).
+# ------------------------------------------------------------
+JWT_HORAS_EXPIRACION_DEFECTO = 2
+
+
+def _obtener_horas_expiracion() -> int:
+    """Lee y valida JWT_EXPIRE_HOURS (o el valor por defecto si no está definida)."""
+    valor = os.getenv("JWT_EXPIRE_HOURS", str(JWT_HORAS_EXPIRACION_DEFECTO))
+    try:
+        horas = int(valor)
+    except ValueError:
+        raise RuntimeError(
+            f"JWT_EXPIRE_HOURS debe ser un número entero de horas; se recibió {valor!r}."
+        )
+    if horas <= 0:
+        raise RuntimeError("JWT_EXPIRE_HOURS debe ser mayor a 0.")
+    return horas
 
 # Esquema OAuth2 "password flow". tokenUrl="login" le dice a FastAPI (y a la
 # página /docs) que el token se obtiene haciendo POST a /login. Se usa como
@@ -224,16 +250,51 @@ def crear_token_acceso(datos: dict) -> str:
         El id se usa para reidentificar al usuario en la BD en cada petición
         (ver obtener_usuario_actual). El rol del token es informativo: la
         autorización compara contra el rol guardado en la BD (fuente de verdad).
-      - exp: fecha/hora de expiración (ahora + 6 horas). python-jose la
-        valida sola al decodificar y rechaza el token si ya pasó.
+      - iat ("issued at"): el instante EXACTO en que se emitió este token (claim
+        estándar de JWT). No se usa para nada al validar la firma; lo agregamos
+        para poder invalidar sesiones "de golpe" (ver la explicación grande más
+        abajo y obtener_usuario_actual en dependencias.py).
+      - exp: fecha/hora de expiración (ahora + JWT_EXPIRE_HOURS, 2h por
+        defecto). python-jose la valida sola al decodificar y rechaza el
+        token si ya pasó.
     Recordá: estos datos van firmados pero NO cifrados, así que no se debe
     incluir nada secreto.
+
+    ------------------------------------------------------------------
+    ¿POR QUÉ UN JWT NO SE PUEDE "REVOCAR" DIRECTAMENTE?
+
+    Un JWT es "autocontenido" (stateless): toda la información para validarlo
+    (payload + firma) viaja DENTRO del propio token. El servidor lo verifica
+    recalculando la firma con su clave secreta, SIN necesidad de consultar
+    ninguna base de datos ni "lista de tokens vigentes". Esa es justamente su
+    ventaja de rendimiento/escalabilidad... pero también su límite: una vez
+    emitido y firmado, el servidor no tiene ningún registro de que ese token
+    existe, así que no hay un "borralo de la lista" posible. Mientras la firma
+    sea válida y no haya pasado su 'exp', CUALQUIER copia de ese token (en
+    cualquier dispositivo) sigue sirviendo para autenticarse, así el usuario
+    cambie su contraseña o un admin quiera forzar el cierre de esa sesión.
+
+    ¿CÓMO LO RESOLVEMOS ACÁ (sesion_valida_desde)? Con una marca de tiempo por
+    usuario en la base (columna usuarios.sesion_valida_desde). Cuando un admin
+    pide "cerrar sesiones" de un usuario (POST /usuarios/{id}/cerrar-sesiones),
+    el backend guarda ahí el instante actual. Como CADA petición autenticada YA
+    consulta la fila del usuario en la BD para saber quién es (obtener_usuario_
+    actual necesita el rol/estado actual de todos modos, la fuente de verdad
+    NUNCA es el token), aprovechamos esa misma consulta para comparar: si el
+    'iat' del token (cuándo se emitió) es ANTERIOR a sesion_valida_desde
+    (cuándo se invalidaron las sesiones), lo rechazamos con 401, aunque la
+    firma sea perfectamente válida y todavía no haya expirado. Así logramos el
+    efecto de "revocar" sin mantener una lista de tokens: es una invalidación
+    "por fecha de corte", no por token individual, y punto que un usuario deje
+    de "colar" un token viejo con solo esta consulta extra (que ya hacíamos).
+    ------------------------------------------------------------------
     """
     # Copiamos para no modificar el diccionario original del que llama.
     a_codificar = datos.copy()
-    # Calculamos la expiración en UTC (timezone-aware) y la añadimos como 'exp'.
-    expira = datetime.now(timezone.utc) + timedelta(hours=JWT_HORAS_EXPIRACION)
-    a_codificar.update({"exp": expira})
+    # Un solo "ahora" para que iat y el cálculo de exp sean coherentes entre sí.
+    ahora = datetime.now(timezone.utc)
+    expira = ahora + timedelta(hours=_obtener_horas_expiracion())
+    a_codificar.update({"iat": ahora, "exp": expira})
     # Firmamos con la clave secreta y el algoritmo elegido. El resultado es
     # el token en formato compacto "xxxxx.yyyyy.zzzzz".
     return jwt.encode(a_codificar, _obtener_clave_secreta(), algorithm=JWT_ALGORITHM)
@@ -255,7 +316,7 @@ def verificar_token(token: str) -> dict:
         carga = jwt.decode(token, _obtener_clave_secreta(), algorithms=[JWT_ALGORITHM])
         return carga
     except ExpiredSignatureError:
-        # El token era válido pero ya pasó su fecha de expiración (6 horas).
+        # El token era válido pero ya pasó su fecha de expiración (JWT_EXPIRE_HOURS).
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="El token expiró, iniciá sesión de nuevo",

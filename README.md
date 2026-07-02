@@ -44,6 +44,21 @@ lavanderia/
    mysql -u root -p lavanderia < schema.sql
    ```
    (o ábrelo en MySQL Workbench / DBeaver y ejecútalo).
+3. **Si tu base YA existía de antes** (con datos), `schema.sql` usa
+   `CREATE TABLE IF NOT EXISTS` y no le agrega columnas nuevas a una tabla que
+   ya tenías. Corré, en orden, las migraciones que todavía no hayas aplicado
+   (cada una avisa "Duplicate column/constraint" si ya está hecha; ignoralo):
+   - `migracion_auditoria.sql` — tabla `auditoria` + `chk_usuarios_rol`.
+   - `migracion_notas_pedidos.sql` — columna `pedidos.notas`.
+   - `migracion_check_estado_pedidos.sql` — `chk_pedidos_estado`.
+   - `migracion_sesion_valida_desde.sql` — columna `usuarios.sesion_valida_desde`.
+
+   > **Importante para producción:** esto aplica IGUAL si tu base de Railway/
+   > Render ya existía antes de que se agregaran estas columnas al `schema.sql`.
+   > Una base de producción creada con una versión vieja de `schema.sql` necesita
+   > estas mismas migraciones antes de desplegar el backend actualizado (si no,
+   > el backend fallará al usar columnas que la tabla todavía no tiene). Una base
+   > **nueva**, creada con el `schema.sql` actual, ya las incluye todas.
 
 ### 2) Backend
 ```powershell
@@ -79,6 +94,7 @@ El frontend queda en `http://localhost:5173`.
 | `DATABASE_URL` | En la nube | `mysql://usuario:clave@host:3306/basedatos` | URL **completa** de MySQL. Si está definida, tiene prioridad sobre las piezas `DB_*`. Acepta `mysql://` o `mysql+pymysql://`. |
 | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Solo local | `localhost` / `3306` / `root` / `...` / `lavanderia` | Alternativa a `DATABASE_URL` para desarrollo local. |
 | `JWT_SECRET_KEY` | **Siempre** | (64 caracteres aleatorios) | Firma los tokens de login. **Crítica.** Genera una con: `python -c "import secrets; print(secrets.token_urlsafe(64))"`. Usa una distinta en producción. |
+| `JWT_EXPIRE_HOURS` | No (default `2`) | `2` | Horas de vida del token antes de tener que loguearse de nuevo. |
 | `CORS_ORIGINS` | En producción | `https://mi-lavanderia.vercel.app` | Dominios del frontend autorizados (lista separada por comas). Si no está, se permite solo el Vite local. **Nunca uses `*`.** |
 
 Solo para el script `crear_admin.py` (no las usa el servidor):

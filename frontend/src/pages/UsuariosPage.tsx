@@ -14,10 +14,21 @@
 // ============================================================
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Search, Pencil, Trash2, Loader2, AlertCircle, Inbox } from "lucide-react";
-import { listarUsuarios, eliminarUsuario } from "../services/usuarios";
+import {
+  Plus,
+  Search,
+  Pencil,
+  Trash2,
+  LogOut,
+  Loader2,
+  AlertCircle,
+  Inbox,
+  X,
+} from "lucide-react";
+import { listarUsuarios, eliminarUsuario, cerrarSesionesUsuario } from "../services/usuarios";
 import type { Usuario } from "../services/usuarios";
 import { obtenerIdUsuario } from "../services/auth";
+import { useAuth } from "../context/AuthContext";
 import RolBadge from "../components/RolBadge";
 import UsuarioFormModal from "../components/UsuarioFormModal";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -35,12 +46,30 @@ export default function UsuariosPage() {
   const [borrando, setBorrando] = useState(false);
   const [errorBorrar, setErrorBorrar] = useState<string | null>(null);
 
+  // Cerrar sesiones (en todos los dispositivos): usuario objetivo del diálogo
+  // de confirmación, su estado de carga/error, y un aviso de ÉXITO aparte (esta
+  // acción, a diferencia de crear/editar/borrar, necesita un mensaje de éxito
+  // explícito, ver el pedido original).
+  const [aCerrarSesiones, setACerrarSesiones] = useState<Usuario | null>(null);
+  const [cerrandoSesiones, setCerrandoSesiones] = useState(false);
+  const [errorCerrarSesiones, setErrorCerrarSesiones] = useState<string | null>(null);
+  const [mensajeExito, setMensajeExito] = useState<string | null>(null);
+
   // Id del usuario de la SESIÓN ACTIVA (del token, solo para la interfaz). Lo
-  // usamos para impedir que el admin se borre a sí mismo. Comparamos por ID (no
-  // por nombre) porque es el identificador estable y el MISMO criterio del
-  // backend; si por algún motivo no se puede leer (null), el guard no se activa
-  // pero la barrera real del backend igual rechaza el auto-borrado con 409.
+  // usamos para impedir que el admin se borre a sí mismo Y para saber si "cerrar
+  // sesiones" se está aplicando sobre SU PROPIA cuenta (caso especial: ver
+  // confirmarCerrarSesiones). Comparamos por ID (no por nombre) porque es el
+  // identificador estable y el MISMO criterio del backend; si por algún motivo
+  // no se puede leer (null), el guard de auto-borrado no se activa pero la
+  // barrera real del backend igual rechaza el auto-borrado con 409.
   const idUsuarioActual = obtenerIdUsuario();
+
+  // cerrarSesion (del contexto): la usamos SOLO cuando el admin cierra sus
+  // PROPIAS sesiones, para reflejar de inmediato en esta pestaña que su token ya
+  // no sirve (en vez de esperar a que la próxima llamada a la API reciba el 401
+  // del apiFetch global). Es el mismo mecanismo que el botón "Cerrar sesión" de
+  // la barra lateral: limpia el estado de auth y ProtectedRoute redirige solo.
+  const { cerrarSesion } = useAuth();
 
   // Carga (o recarga) la lista de usuarios.
   const cargar = useCallback(async () => {
@@ -83,6 +112,44 @@ export default function UsuariosPage() {
     }
   }
 
+  // Confirma el cierre de sesiones (todos los dispositivos) del usuario elegido.
+  async function confirmarCerrarSesiones() {
+    if (!aCerrarSesiones) return;
+    const esCuentaPropia =
+      idUsuarioActual != null && aCerrarSesiones.id === idUsuarioActual;
+
+    setCerrandoSesiones(true);
+    setErrorCerrarSesiones(null);
+    try {
+      await cerrarSesionesUsuario(aCerrarSesiones.id);
+
+      if (esCuentaPropia) {
+        // El token que usamos para hacer ESTE MISMO pedido ya quedó invalidado
+        // (sesion_valida_desde se puso en "ahora" en el backend): la próxima
+        // llamada a la API recibiría 401 igual, pero no tiene sentido esperar
+        // a eso. Cerramos la sesión del lado del cliente YA: limpia el token y
+        // el estado de auth, y ProtectedRoute redirige solo al login (mismo
+        // mecanismo que el botón "Cerrar sesión" de la barra lateral).
+        cerrarSesion();
+        return;
+      }
+
+      // Otro usuario: cerramos el diálogo, avisamos con un mensaje de éxito
+      // claro y recargamos la lista (consistente con el resto de las acciones).
+      setACerrarSesiones(null);
+      setMensajeExito(
+        `Sesión cerrada para "${aCerrarSesiones.nombre_usuario}" en todos sus dispositivos.`
+      );
+      await cargar();
+    } catch (err) {
+      setErrorCerrarSesiones(
+        err instanceof Error ? err.message : "No se pudieron cerrar las sesiones."
+      );
+    } finally {
+      setCerrandoSesiones(false);
+    }
+  }
+
   return (
     <div>
       {/* Encabezado */}
@@ -94,7 +161,10 @@ export default function UsuariosPage() {
           </p>
         </div>
         <button
-          onClick={() => setModal("nuevo")}
+          onClick={() => {
+            setMensajeExito(null);
+            setModal("nuevo");
+          }}
           className="flex shrink-0 items-center gap-2 rounded-lg bg-acero px-4 py-2 text-sm font-medium text-white transition hover:bg-acero-fuerte"
         >
           <Plus className="h-4 w-4" />
@@ -113,6 +183,20 @@ export default function UsuariosPage() {
           className="w-full rounded-lg border border-slate-700 bg-slate-800 py-2 pl-9 pr-3 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-acero focus:ring-2 focus:ring-acero/40 sm:max-w-md"
         />
       </div>
+
+      {/* Aviso de éxito al cerrar sesiones de OTRO usuario (descartable). */}
+      {mensajeExito && (
+        <div className="mt-4 flex items-start justify-between gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
+          <span>{mensajeExito}</span>
+          <button
+            onClick={() => setMensajeExito(null)}
+            aria-label="Cerrar aviso"
+            className="shrink-0 rounded p-0.5 text-emerald-300/80 transition hover:text-emerald-200"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* Contenido: cargando / error / vacío / tabla */}
       <div className="mt-5">
@@ -173,9 +257,14 @@ export default function UsuariosPage() {
                       </div>
                       <RolBadge rol={u.rol} />
                     </div>
-                    <div className="mt-3 flex justify-end gap-2 border-t border-slate-800 pt-3">
+                    {/* flex-wrap: con 3 acciones, en pantallas muy angostas
+                        conviene poder bajar a una segunda línea en vez de desbordar. */}
+                    <div className="mt-3 flex flex-wrap justify-end gap-2 border-t border-slate-800 pt-3">
                       <button
-                        onClick={() => setModal(u)}
+                        onClick={() => {
+                          setMensajeExito(null);
+                          setModal(u);
+                        }}
                         className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-slate-700"
                       >
                         <Pencil className="h-4 w-4" />
@@ -183,7 +272,19 @@ export default function UsuariosPage() {
                       </button>
                       <button
                         onClick={() => {
+                          setErrorCerrarSesiones(null);
+                          setMensajeExito(null);
+                          setACerrarSesiones(u);
+                        }}
+                        className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-300 transition hover:bg-amber-500/20"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        Cerrar sesiones
+                      </button>
+                      <button
+                        onClick={() => {
                           setErrorBorrar(null);
+                          setMensajeExito(null);
                           setABorrar(u);
                         }}
                         disabled={esCuentaPropia}
@@ -239,7 +340,10 @@ export default function UsuariosPage() {
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-2">
                             <button
-                              onClick={() => setModal(u)}
+                              onClick={() => {
+                                setMensajeExito(null);
+                                setModal(u);
+                              }}
                               aria-label={`Editar usuario ${u.nombre_usuario}`}
                               className="rounded-md p-2 text-slate-400 transition hover:bg-slate-800 hover:text-acero"
                             >
@@ -247,7 +351,20 @@ export default function UsuariosPage() {
                             </button>
                             <button
                               onClick={() => {
+                                setErrorCerrarSesiones(null);
+                                setMensajeExito(null);
+                                setACerrarSesiones(u);
+                              }}
+                              title="Cerrar sesión en todos los dispositivos"
+                              aria-label={`Cerrar sesiones de ${u.nombre_usuario} en todos sus dispositivos`}
+                              className="rounded-md p-2 text-slate-400 transition hover:bg-slate-800 hover:text-amber-400"
+                            >
+                              <LogOut className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => {
                                 setErrorBorrar(null);
+                                setMensajeExito(null);
                                 setABorrar(u);
                               }}
                               // Deshabilitado para la propia cuenta: un admin no puede
@@ -298,6 +415,27 @@ export default function UsuariosPage() {
           onCancelar={() => {
             setABorrar(null);
             setErrorBorrar(null);
+          }}
+        />
+      )}
+
+      {/* Confirmación de cerrar sesiones. El mensaje cambia si es la CUENTA
+          PROPIA: advertimos explícitamente que también cierra la sesión actual. */}
+      {aCerrarSesiones && (
+        <ConfirmDialog
+          titulo="Cerrar sesión en todos los dispositivos"
+          mensaje={
+            idUsuarioActual != null && aCerrarSesiones.id === idUsuarioActual
+              ? `¿Seguro que quieres cerrar TODAS tus sesiones activas? Esto incluye tu sesión ACTUAL: se cerrará de inmediato y volverás a la pantalla de inicio de sesión.`
+              : `¿Seguro que quieres cerrar todas las sesiones activas de “${aCerrarSesiones.nombre_usuario}”? Tendrá que iniciar sesión de nuevo en todos sus dispositivos.`
+          }
+          textoConfirmar="Cerrar sesiones"
+          cargando={cerrandoSesiones}
+          error={errorCerrarSesiones}
+          onConfirmar={confirmarCerrarSesiones}
+          onCancelar={() => {
+            setACerrarSesiones(null);
+            setErrorCerrarSesiones(null);
           }}
         />
       )}

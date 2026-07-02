@@ -89,6 +89,23 @@ class Usuario(Base):
     # nombre_completo: VARCHAR(150), opcional (puede ser NULL).
     nombre_completo = Column(String(150), nullable=True)
 
+    # sesion_valida_desde: DATETIME(6), OPCIONAL (NULL = nunca se forzó un cierre
+    # de sesión). Es la "fecha de corte" para invalidar sesiones sin poder revocar
+    # JWTs directamente (ver la explicación grande en seguridad.py:crear_token_
+    # acceso). Cuando un admin cierra las sesiones de este usuario (POST
+    # /usuarios/{id}/cerrar-sesiones), acá se guarda el instante actual (en UTC,
+    # sin tzinfo -> "naive-UTC", para poder compararlo directo contra el 'iat' del
+    # token, que también viaja en UTC). Cualquier token emitido ANTES de esta
+    # marca queda rechazado en la próxima petición (dependencias.py).
+    # OJO: la columna real en la BD es DATETIME(6) (con microsegundos; ver
+    # schema.sql y migracion_sesion_valida_desde.sql). El tipo genérico DateTime
+    # de SQLAlchemy de acá NO trunca esa precisión al leer/escribir (el límite de
+    # microsegundos es 100% una propiedad de la columna en MySQL, no de este tipo
+    # de Python); si la columna NO tuviera microsegundos, un login y un cierre de
+    # sesión en el MISMO segundo de reloj podrían colisionar y dejar pasar un
+    # token que debería haberse invalidado.
+    sesion_valida_desde = Column(DateTime, nullable=True)
+
     # Relación inversa: lista de pedidos registrados por este usuario.
     # passive_deletes='all': delegamos por completo en la regla ON DELETE
     # RESTRICT de la BD (definida en la FK y en schema.sql). Usamos 'all'
