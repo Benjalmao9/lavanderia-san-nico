@@ -3,11 +3,11 @@
 //
 //  - insumo=null -> CREAR (POST /insumos). insumo=objeto -> EDITAR (PUT /insumos/{id}).
 //  - Recibe la lista de CATEGORÍAS ya cargada (la trae la pantalla desde
-//    GET /categorias) para llenar el desplegable. categoria es OPCIONAL: la
-//    opción "Sin categoría" envía categoria_id = null.
+//    GET /categorias) para llenar el desplegable. La categoría es OBLIGATORIA:
+//    ya no existe la opción "Sin categoría"; hay que elegir una antes de guardar.
 //
-//  Validación coherente con el backend: nombre no vacío (<=150), cantidad y
-//  stock mínimo enteros >= 0 (no negativos).
+//  Validación coherente con el backend: nombre no vacío (<=150), categoría
+//  elegida (obligatoria) y cantidad/stock mínimo enteros >= 0 (no negativos).
 // ============================================================
 
 import { useState } from "react";
@@ -26,6 +26,7 @@ interface Props {
 
 interface ErroresForm {
   nombre?: string;
+  categoria_id?: string;
   cantidad?: string;
   stock_minimo?: string;
 }
@@ -42,7 +43,10 @@ export default function InsumoFormModal({ insumo, categorias, onCerrar, onGuarda
   const esEdicion = insumo !== null;
 
   const [nombre, setNombre] = useState(insumo?.nombre ?? "");
-  // El <select> trabaja con strings; "" representa "Sin categoría" (null).
+  // El <select> trabaja con strings. "" = todavía SIN elegir (placeholder). En
+  // alta arranca vacío para forzar una elección; al editar un insumo viejo que no
+  // tenía categoría, también arranca vacío y habrá que elegir una para poder
+  // guardar (así se van clasificando los insumos antiguos, uno a uno).
   const [categoriaId, setCategoriaId] = useState(
     insumo?.categoria_id != null ? String(insumo.categoria_id) : ""
   );
@@ -61,6 +65,10 @@ export default function InsumoFormModal({ insumo, categorias, onCerrar, onGuarda
     const n = nombre.trim();
     if (!n) e.nombre = "Ingresa el nombre del insumo.";
     else if (n.length > 150) e.nombre = "Máximo 150 caracteres.";
+
+    // Categoría OBLIGATORIA: "" es el placeholder (sin elegir). Coincide con el
+    // backend, que ahora exige categoria_id al crear/editar.
+    if (!categoriaId) e.categoria_id = "Selecciona una categoría.";
 
     // Cantidad y stock mínimo: enteros >= 0 (no negativos, sin decimales) y con
     // tope superior = máximo de un INT de MySQL (la columna es INT). Sin el tope,
@@ -88,8 +96,9 @@ export default function InsumoFormModal({ insumo, categorias, onCerrar, onGuarda
 
     const payload: InsumoEntrada = {
       nombre: nombre.trim(),
-      // "" -> null (Sin categoría); si hay valor, lo pasamos a número.
-      categoria_id: categoriaId === "" ? null : Number(categoriaId),
+      // La validación garantiza que categoriaId no está vacío, así que acá siempre
+      // es un id numérico válido (la categoría es obligatoria).
+      categoria_id: Number(categoriaId),
       cantidad: Number(cantidad),
       stock_minimo: Number(stockMinimo),
     };
@@ -132,7 +141,8 @@ export default function InsumoFormModal({ insumo, categorias, onCerrar, onGuarda
           {errores.nombre && <p className="mt-1 text-xs text-red-400">{errores.nombre}</p>}
         </div>
 
-        {/* Categoría: desplegable cargado desde la API (con opción Sin categoría) */}
+        {/* Categoría: desplegable cargado desde la API. OBLIGATORIA: el placeholder
+            no es seleccionable y hay que elegir una categoría real antes de guardar. */}
         <div>
           <label htmlFor="categoria" className="mb-1.5 block text-sm text-slate-300">
             Categoría
@@ -141,15 +151,30 @@ export default function InsumoFormModal({ insumo, categorias, onCerrar, onGuarda
             id="categoria"
             value={categoriaId}
             onChange={(e) => setCategoriaId(e.target.value)}
-            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-100 outline-none transition focus:border-acero focus:ring-2 focus:ring-acero/40"
+            className={claseInput(!!errores.categoria_id)}
           >
-            <option value="">Sin categoría</option>
+            {/* Placeholder no seleccionable (disabled): fuerza elegir una categoría
+                real y evita volver a "sin elegir" una vez seleccionada. */}
+            <option value="" disabled>
+              Selecciona una categoría
+            </option>
             {categorias.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.nombre}
               </option>
             ))}
           </select>
+          {errores.categoria_id && (
+            <p className="mt-1 text-xs text-red-400">{errores.categoria_id}</p>
+          )}
+          {/* Si todavía no hay categorías, no se puede clasificar: guiamos al admin
+              a crearlas primero en su pantalla dedicada. */}
+          {categorias.length === 0 && (
+            <p className="mt-1 text-xs text-amber-400">
+              No hay categorías todavía. Crea una en la sección “Categorías” antes de
+              registrar insumos.
+            </p>
+          )}
         </div>
 
         {/* Cantidad y stock mínimo, en una fila */}

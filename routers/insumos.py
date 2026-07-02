@@ -48,8 +48,10 @@ router = APIRouter(
 #  Función auxiliar: validar que una categoría exista.
 #  Si categoria_id viene con un valor, comprobamos que esa categoría
 #  esté en la base. Si no existe, respondemos 400 (dato inválido del
-#  cliente). Si categoria_id es None, no hay nada que validar (el
-#  insumo puede quedar sin categoría).
+#  cliente). El caso None quedó como defensa: hoy ninguna ruta llega
+#  hasta acá con None (al crear es obligatorio; al editar, el router
+#  rechaza el null antes de llamar a esta función), pero mantenemos el
+#  early-return por robustez si alguien la reutiliza en otro contexto.
 # ------------------------------------------------------------
 def validar_categoria(categoria_id, db: Session):
     if categoria_id is None:
@@ -118,7 +120,8 @@ def crear_insumo(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(obtener_usuario_actual),
 ):
-    # Si se indicó una categoría, comprobamos que exista.
+    # categoria_id ahora es obligatorio (lo garantiza InsumoCrear con un 422 si
+    # falta o viene null). Acá comprobamos que esa categoría EXISTA de verdad.
     validar_categoria(datos.categoria_id, db)
 
     nuevo_insumo = Insumo(
@@ -185,6 +188,18 @@ def actualizar_insumo(
 
     # Si está cambiando la categoría, validamos la nueva categoría.
     if "categoria_id" in cambios:
+        # NUEVA REGLA: un insumo ya no puede quedar "sin categoría". Si el cliente
+        # envía categoria_id EXPLÍCITAMENTE como null, lo rechazamos con un 400
+        # claro (mismo patrón que el guard de null de nombre_usuario/rol en
+        # usuarios.py) ANTES de tocar nada. Distinguimos "omitido" (no está en
+        # 'cambios' -> no se valida ni se toca) de "enviado como null" (sí está,
+        # con valor None -> se rechaza). El frontend siempre manda una categoría
+        # válida; este guard protege el endpoint ante llamadas directas (curl).
+        if cambios["categoria_id"] is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La categoría es obligatoria: no puede quedar vacía",
+            )
         validar_categoria(cambios["categoria_id"], db)
 
     for campo, valor in cambios.items():
