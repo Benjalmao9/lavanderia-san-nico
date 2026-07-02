@@ -23,12 +23,20 @@ export interface Categoria {
   nombre: string;
 }
 
-// Datos que enviamos al crear/editar un insumo.
+// Datos que enviamos al crear/editar un insumo. categoria_id AHORA es un número
+// obligatorio (antes admitía null = "sin categoría"): la categoría dejó de ser
+// opcional. El backend exige un id válido al crear y el formulario siempre envía
+// una categoría elegida (también al editar), así que aquí ya no hay null.
 export interface InsumoEntrada {
   nombre: string;
-  categoria_id: number | null;
+  categoria_id: number;
   cantidad: number;
   stock_minimo: number;
+}
+
+// Datos para crear una categoría (POST /categorias): solo el nombre.
+export interface CategoriaEntrada {
+  nombre: string;
 }
 
 // GET /insumos -> todos los insumos.
@@ -50,6 +58,14 @@ export async function insumosEnAlerta(): Promise<Insumo[]> {
 export async function listarCategorias(): Promise<Categoria[]> {
   const r = await apiFetch("/categorias");
   if (!r.ok) throw new Error(await mensajeDeError(r, "No se pudieron cargar las categorías."));
+  return r.json();
+}
+
+// POST /categorias -> crea una categoría (solo admin). El backend responde 409 si
+// el nombre ya existe; mensajeDeError expone ese texto tal cual al usuario.
+export async function crearCategoria(datos: CategoriaEntrada): Promise<Categoria> {
+  const r = await apiFetch("/categorias", { method: "POST", body: JSON.stringify(datos) });
+  if (!r.ok) throw new Error(await mensajeDeError(r, "No se pudo crear la categoría."));
   return r.json();
 }
 

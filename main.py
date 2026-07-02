@@ -58,7 +58,8 @@ from limitador import limiter
 # 'auth' contiene el login (POST /login) que devuelve el token JWT.
 # 'auditoria' expone la consulta de la bitácora (solo admin).
 # 'reportes' expone los reportes del negocio con agregaciones (solo admin).
-# 'categorias' lista las categorías (para el desplegable de insumos del frontend).
+# 'categorias' lista las categorías (desplegable de insumos) y permite crearlas
+# (solo admin, desde la pantalla de Categorías del frontend).
 from routers import pedidos, insumos, usuarios, auth, auditoria, reportes, categorias
 
 # Creamos un logger propio de la aplicación. Aquí escribimos el detalle real de los

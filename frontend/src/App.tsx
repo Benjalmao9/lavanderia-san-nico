@@ -9,7 +9,7 @@
 //           - /pedidos     -> cualquier rol
 //           - /inventario  -> cualquier rol
 //           - dentro de <AdminRoute> (requiere admin):
-//               - /usuarios, /auditoria
+//               - /categorias, /usuarios, /auditoria
 //   - *  -> cualquier otra ruta vuelve a "/".
 //
 //  CÓMO FUNCIONAN LAS RUTAS PROTEGIDAS:
@@ -29,6 +29,7 @@ import LoginPage from "./pages/LoginPage";
 import PanelPage from "./pages/PanelPage";
 import PedidosPage from "./pages/PedidosPage";
 import InventarioPage from "./pages/InventarioPage";
+import CategoriasPage from "./pages/CategoriasPage";
 import UsuariosPage from "./pages/UsuariosPage";
 import AuditoriaPage from "./pages/AuditoriaPage";
 
@@ -64,6 +65,7 @@ export default function App() {
 
               {/* Secciones solo para administradores */}
               <Route element={<AdminRoute />}>
+                <Route path="categorias" element={<CategoriasPage />} />
                 <Route path="usuarios" element={<UsuariosPage />} />
                 <Route path="auditoria" element={<AuditoriaPage />} />
               </Route>

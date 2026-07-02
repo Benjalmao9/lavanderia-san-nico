@@ -26,6 +26,7 @@ import {
   LayoutDashboard,
   ClipboardList,
   Package,
+  Tags,
   Users,
   ScrollText,
   LogOut,
@@ -55,6 +56,8 @@ const ITEMS: ItemNav[] = [
   { to: "/", etiqueta: "Panel", icono: LayoutDashboard, soloAdmin: true },
   { to: "/pedidos", etiqueta: "Pedidos", icono: ClipboardList, soloAdmin: false },
   { to: "/inventario", etiqueta: "Inventario", icono: Package, soloAdmin: false },
+  // Categorías va junto a Inventario (lo clasifica) pero es tarea de admin.
+  { to: "/categorias", etiqueta: "Categorías", icono: Tags, soloAdmin: true },
   { to: "/usuarios", etiqueta: "Usuarios", icono: Users, soloAdmin: true },
   { to: "/auditoria", etiqueta: "Auditoría", icono: ScrollText, soloAdmin: true },
 ];

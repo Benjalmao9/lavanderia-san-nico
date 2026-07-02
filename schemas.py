@@ -207,11 +207,13 @@ class UsuarioRespuesta(BaseModel):
 
 # ============================================================
 #  INSUMO
-#  Crear: nombre + categoría + cantidades. categoria_id es opcional
-#         (un insumo puede no tener categoría todavía). cantidad y
-#         stock_minimo arrancan en 0 si no se especifican.
-#  Actualizar: los mismos campos, pero TODOS opcionales, para poder
-#         editar solo lo que cambia (ej: solo la cantidad).
+#  Crear: nombre + categoría + cantidades. categoria_id ES OBLIGATORIO:
+#         todo insumo nuevo nace clasificado (regla de negocio a nivel de app;
+#         la columna en la BD sigue admitiendo NULL, pero la API ya no). cantidad
+#         y stock_minimo arrancan en 0 si no se especifican.
+#  Actualizar: los mismos campos, pero TODOS opcionales, para poder editar solo
+#         lo que cambia (ej: solo la cantidad). categoria_id se puede OMITIR (no
+#         se toca), pero si se envía no puede ser null (ver el guard en el router).
 #  Respuesta: incluye el id que asignó la base.
 # ============================================================
 class InsumoCrear(BaseModel):
@@ -224,7 +226,13 @@ class InsumoCrear(BaseModel):
     nombre: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)
     ]
-    categoria_id: Optional[int] = None
+    # categoria_id AHORA es OBLIGATORIO (antes era Optional con default None).
+    # Regla de negocio: un insumo nuevo debe nacer con categoría. Al no tener
+    # default, omitirlo o enviarlo como null produce un 422 claro de Pydantic. Que
+    # el id EXISTA de verdad lo valida el router (validar_categoria -> 400 si no).
+    # gt=0: los ids autoincrementales arrancan en 1, así un 0/negativo se descarta
+    # de entrada con un 422 en vez de llegar como un 400 más tardío.
+    categoria_id: int = Field(gt=0)
     # ge=0 (no gt) porque 0 es el valor por defecto legitimo, pero un
     # stock negativo no tiene sentido fisico y distorsiona /insumos/alertas.
     # le=2147483647: tope = maximo de un INT signed de MySQL (la columna es INT).
@@ -248,6 +256,12 @@ class InsumoActualizar(BaseModel):
             StringConstraints(strip_whitespace=True, min_length=1, max_length=150),
         ]
     ] = None
+    # categoria_id OMITIBLE (si no se envía, no se toca). PERO ya no se admite
+    # dejar un insumo "sin categoría": si el cliente lo ENVÍA, debe ser un id de
+    # categoría existente y NUNCA null. Se mantiene Optional[int]=None SOLO para
+    # permitir omitirlo; el rechazo del null explícito y la comprobación de que la
+    # categoría exista viven en el router (actualizar_insumo), igual que el guard
+    # de null de nombre_usuario/rol en usuarios.py.
     categoria_id: Optional[int] = None
     # Mismo tope que en InsumoCrear (máximo de un INT de MySQL).
     cantidad: Optional[int] = Field(default=None, ge=0, le=2147483647)
