@@ -77,3 +77,21 @@ export async function eliminarUsuario(id: number): Promise<void> {
   const r = await apiFetch(`/usuarios/${id}`, { method: "DELETE" });
   if (!r.ok) throw new Error(await mensajeDeError(r, "No se pudo eliminar el usuario."));
 }
+
+// POST /usuarios/{id}/cerrar-sesiones -> fuerza el cierre de TODAS las
+// sesiones activas de ese usuario (en cualquier dispositivo). Un JWT no se
+// puede "revocar" directamente (es autocontenido: su firma alcanza para
+// validarlo, sin consultar al backend); por eso esto NO invalida el token en
+// sí, sino que marca en el backend una fecha de corte (sesion_valida_desde):
+// cualquier token emitido ANTES de esa marca deja de servir en la próxima
+// petición (ver la explicación completa en seguridad.py y dependencias.py).
+// Si se aplica sobre la CUENTA PROPIA, el token que se está usando ahora mismo
+// para hacer este pedido queda invalidado A PARTIR de este instante (ver el
+// manejo especial en UsuariosPage).
+export async function cerrarSesionesUsuario(id: number): Promise<{ mensaje: string }> {
+  const r = await apiFetch(`/usuarios/${id}/cerrar-sesiones`, { method: "POST" });
+  if (!r.ok) {
+    throw new Error(await mensajeDeError(r, "No se pudieron cerrar las sesiones."));
+  }
+  return r.json();
+}

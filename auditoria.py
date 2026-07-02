@@ -87,6 +87,12 @@ def registrar_auditoria(
             entidad=entidad,
             entidad_id=entidad_id,
             detalle=detalle_seguro,
+            # datetime.now() SIN forzar UTC: hora LOCAL del servidor (convención
+            # de esta tabla desde el principio). OJO: usuarios.sesion_valida_desde
+            # (routers/usuarios.py) sí es explícitamente UTC, para poder
+            # compararse contra el 'iat' del token. Si correlacionás a mano un
+            # registro de esta tabla contra esa marca, tené en cuenta que pueden
+            # no compartir la misma zona horaria.
             fecha=datetime.now(),
         )
         db.add(log)

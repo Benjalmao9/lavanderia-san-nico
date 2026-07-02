@@ -12,6 +12,8 @@
 #  paso de login/JWT. Aquí solo dejamos el CRUD con hashing funcionando.
 # ============================================================
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -348,3 +350,63 @@ def eliminar_usuario(
         detalle=f"nombre_usuario={nombre_borrado}",
     )
     return {"mensaje": f"El usuario con id {usuario_id} fue eliminado correctamente"}
+
+
+# ============================================================
+#  POST /usuarios/{usuario_id}/cerrar-sesiones
+#  Fuerza el cierre de TODAS las sesiones activas de un usuario (en cualquier
+#  dispositivo), sin poder "revocar" el JWT en sí (ver la explicación grande en
+#  seguridad.py:crear_token_acceso y el chequeo en dependencias.py:obtener_
+#  usuario_actual). Lo que hacemos es marcar "ahora" como fecha de corte: en su
+#  próxima petición, cualquier token de este usuario emitido ANTES de esta
+#  marca queda rechazado con 401, aunque su firma siga siendo válida.
+#
+#  Funciona sobre CUALQUIER usuario, incluido el propio admin que ejecuta la
+#  acción (a propósito: p. ej. si sospecha que su cuenta está comprometida,
+#  puede cerrar sus propias sesiones desde acá igual que las de cualquier
+#  otro). No hay guard de "no podés hacerte esto a vos mismo" como en el
+#  DELETE: acá SÍ tiene sentido que un admin se lo aplique a sí mismo.
+# ============================================================
+@router.post("/{usuario_id}/cerrar-sesiones")
+def cerrar_sesiones(
+    usuario_id: int,
+    db: Session = Depends(get_db),
+    admin_actual: Usuario = Depends(requerir_admin),
+):
+    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    if usuario is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No existe un usuario con id {usuario_id}",
+        )
+
+    # "Naive-UTC" (sin tzinfo) a propósito: así se compara directo contra el
+    # 'iat' del token, que también se reconstruye en UTC (ver dependencias.py).
+    # OJO: esto es DISTINTO de fecha en Auditoria (más abajo), que usa
+    # datetime.now() SIN forzar UTC (hora local del servidor). Si comparás esta
+    # marca contra el timestamp de un registro de auditoría a mano, tené en
+    # cuenta que pueden no compartir la misma zona horaria.
+    usuario.sesion_valida_desde = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("Error de base de datos al cerrar sesiones de usuario")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No se pudieron cerrar las sesiones",
+        )
+    db.refresh(usuario)
+
+    # Auditoría de una acción sensible: quién forzó el cierre y de quién.
+    registrar_auditoria(
+        admin_actual,
+        "cerrar_sesiones",
+        "usuario",
+        usuario.id,
+        detalle=f"nombre_usuario={usuario.nombre_usuario}",
+    )
+    return {
+        "mensaje": f"Se cerraron las sesiones de '{usuario.nombre_usuario}' en todos sus dispositivos"
+    }

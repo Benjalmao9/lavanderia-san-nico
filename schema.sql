@@ -51,6 +51,16 @@ CREATE TABLE IF NOT EXISTS usuarios (
     -- Nombre y apellido de la persona (opcional).
     nombre_completo VARCHAR(150),
 
+    -- Fecha de corte para invalidar sesiones (JWT emitidos antes de esta marca
+    -- dejan de servir). NULL = nunca se forzó un cierre de sesión. La actualiza
+    -- POST /usuarios/{id}/cerrar-sesiones (solo administradores).
+    -- DATETIME(6) (microsegundos): un DATETIME sin fracción de segundo truncaría
+    -- esta marca al segundo entero, y si un login y un cierre de sesión caen en
+    -- el MISMO segundo de reloj, un token que en realidad se emitió ANTES del
+    -- cierre podría no rechazarse (colisión de precisión). Con microsegundos
+    -- completos, la comparación en dependencias.py queda exacta de este lado.
+    sesion_valida_desde DATETIME(6),
+
     -- Integridad del rol garantizada por la BD, no solo por la aplicación.
     -- MySQL 8.0.16+ hace cumplir este CHECK y rechaza cualquier rol que no sea
     -- 'administrador' o 'empleado'. Es defensa en profundidad: aunque algún día
