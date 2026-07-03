@@ -11,9 +11,12 @@
 
 import logging
 
+from typing import Optional
+
 # Request: lo necesita slowapi (el limitador lo usa para identificar la IP de
 # origen y contar los intentos por cliente).
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+# Form: para recibir el token del CAPTCHA como un campo más del formulario.
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 
 # OAuth2PasswordRequestForm: el formulario ESTÁNDAR de OAuth2. Hace que el
 # login reciba los campos por formulario (username, password) en vez de JSON.
@@ -40,6 +43,11 @@ from seguridad import verificar_contrasena, crear_token_acceso, hashear_contrase
 # Registro de auditoría: dejamos constancia de cada intento de login
 # (exitoso o fallido). NUNCA registramos la contraseña.
 from auditoria import registrar_auditoria
+
+# CAPTCHA de Cloudflare Turnstile, activo SOLO en producción (mismo principio
+# que esconder /docs con ENTORNO: blindajes donde importan, sin estorbar el
+# desarrollo). Ver la explicación completa en turnstile.py.
+from turnstile import es_produccion, verificar_turnstile
 
 logger = logging.getLogger("lavanderia")
 
@@ -84,8 +92,33 @@ _HASH_SENUELO = hashear_contrasena("senuelo-para-tiempo-constante")
 def login(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
+    # Token del CAPTCHA de Turnstile. Viaja como un campo MÁS del mismo
+    # formulario del login, con el nombre estándar que usa Cloudflare
+    # ('cf-turnstile-response'; el alias hace de puente porque un guion no es
+    # válido en un nombre de parámetro de Python). Es Optional a propósito: en
+    # DESARROLLO no se exige (el frontend ni lo manda) y en PRODUCCIÓN el
+    # chequeo de abajo lo vuelve obligatorio.
+    cf_turnstile_response: Optional[str] = Form(
+        default=None, alias="cf-turnstile-response"
+    ),
     db: Session = Depends(get_db),
 ):
+    # 0) CAPTCHA — SOLO EN PRODUCCIÓN, y ANTES de mirar las credenciales.
+    #    Mismo principio que /docs deshabilitado con ENTORNO=produccion:
+    #    el blindaje se activa donde importa (internet, bots reales) y en
+    #    desarrollo se omite POR COMPLETO (ni se exige el campo ni se llama a
+    #    Cloudflare). ¿Por qué ANTES de las credenciales? Para que un bot sin
+    #    CAPTCHA válido ni siquiera nos haga gastar la verificación bcrypt
+    #    (~100 ms pensados para humanos, carísimos frente a un diluvio de
+    #    intentos) ni deje ruido en la auditoría de logins fallidos.
+    #    verificar_turnstile lanza 400 (token ausente/rechazado) o 503
+    #    (Cloudflare inalcanzable -> fail-closed; ver turnstile.py).
+    if es_produccion():
+        # La IP del cliente es una señal extra para Cloudflare (opcional).
+        # Con --proxy-headers (Procfile), request.client.host ya es la IP real.
+        ip_cliente = request.client.host if request.client else None
+        verificar_turnstile(cf_turnstile_response, ip_cliente)
+
     # 1) Buscamos al usuario por su nombre_usuario (lo que viene en 'username'
     #    del formulario OAuth2). Envolvemos la consulta para que un fallo de
     #    base de datos no se filtre como un 500 con traceback.

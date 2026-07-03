@@ -7,11 +7,23 @@
 //  mensajes de error (credenciales incorrectas o fallo de conexión).
 // ============================================================
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { User, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import TurnstileWidget from "../components/TurnstileWidget";
+import type { TurnstileHandle } from "../components/TurnstileWidget";
+
+// CAPTCHA (Cloudflare Turnstile): se activa SOLO si existe la variable
+// VITE_TURNSTILE_SITE_KEY (definida únicamente en producción, en Vercel).
+// En desarrollo no está definida, así que no se muestra ningún widget y el
+// formulario funciona igual que siempre. Es el mismo principio que el backend
+// aplica con ENTORNO para esconder /docs: los blindajes se activan solo donde
+// importan, sin estorbar el desarrollo. (import.meta.env se resuelve en el
+// BUILD, por eso puede vivir fuera del componente como constante.)
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY;
+const CAPTCHA_ACTIVO = Boolean(TURNSTILE_SITE_KEY);
 
 export default function LoginPage() {
   const { iniciarSesion } = useAuth();
@@ -24,13 +36,27 @@ export default function LoginPage() {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Token entregado por el CAPTCHA (null = todavía no completado / expiró).
+  const [tokenTurnstile, setTokenTurnstile] = useState<string | null>(null);
+  // Ref para poder REINICIAR el widget tras un intento fallido: los tokens de
+  // Turnstile son de UN SOLO USO y el backend lo consume al verificarlo, así
+  // que sin reinicio el segundo intento se rechazaría siempre.
+  const refTurnstile = useRef<TurnstileHandle>(null);
+
   async function manejarEnvio(e: FormEvent) {
     e.preventDefault(); // evitamos que el navegador recargue la página
+    // Guard defensivo: el botón ya está deshabilitado sin CAPTCHA completado,
+    // pero por si el envío llega por otra vía (Enter, etc.), avisamos claro.
+    if (CAPTCHA_ACTIVO && !tokenTurnstile) {
+      setError("Completa la verificación de seguridad para iniciar sesión.");
+      return;
+    }
     setError(null);
     setCargando(true);
     try {
-      // iniciarSesion llama a POST /login y guarda el token si todo va bien.
-      await iniciarSesion(usuario, contrasena);
+      // iniciarSesion llama a POST /login (con el token del CAPTCHA si está
+      // activo) y guarda el token de sesión si todo va bien.
+      await iniciarSesion(usuario, contrasena, tokenTurnstile);
       // Login correcto: vamos al dashboard (replace para no dejar el login en
       // el historial de "atrás").
       navigate("/", { replace: true });
@@ -38,11 +64,21 @@ export default function LoginPage() {
       // Mostramos el mensaje del error (genérico para credenciales, o de
       // conexión si el backend no responde).
       setError(err instanceof Error ? err.message : "Error al iniciar sesión");
+      // El intento consumió el token del CAPTCHA (aunque la contraseña haya
+      // sido lo que falló): lo reiniciamos para obtener uno nuevo. Cloudflare
+      // suele renovarlo solo, sin pedirle nada al usuario.
+      if (CAPTCHA_ACTIVO) {
+        setTokenTurnstile(null);
+        refTurnstile.current?.reset();
+      }
     } finally {
       // Pase lo que pase, dejamos de mostrar "cargando".
       setCargando(false);
     }
   }
+
+  // ¿Falta completar el CAPTCHA? (solo puede pasar cuando está activo)
+  const faltaCaptcha = CAPTCHA_ACTIVO && !tokenTurnstile;
 
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
@@ -117,6 +153,25 @@ export default function LoginPage() {
             </div>
           </div>
 
+          {/* CAPTCHA (solo en producción, cuando hay site key configurada).
+              En desarrollo este bloque no se renderiza y no se carga nada. */}
+          {CAPTCHA_ACTIVO && TURNSTILE_SITE_KEY && (
+            <div>
+              <TurnstileWidget
+                siteKey={TURNSTILE_SITE_KEY}
+                onToken={setTokenTurnstile}
+                refWidget={refTurnstile}
+              />
+              {/* Mensaje claro mientras la verificación no esté completa (suele
+                  resolverse sola en un par de segundos, sin acertijos). */}
+              {faltaCaptcha && !cargando && (
+                <p className="mt-1.5 text-center text-xs text-slate-500">
+                  Completa la verificación de seguridad para habilitar el botón.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Mensaje de error (solo si hay) */}
           {error && (
             <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
@@ -124,10 +179,11 @@ export default function LoginPage() {
             </p>
           )}
 
-          {/* Botón de envío en azul acero, con estado de carga */}
+          {/* Botón de envío en azul acero, con estado de carga. Con el CAPTCHA
+              activo queda deshabilitado hasta que Cloudflare entregue el token. */}
           <button
             type="submit"
-            disabled={cargando}
+            disabled={cargando || faltaCaptcha}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-acero py-2.5 font-medium text-white transition hover:bg-acero-fuerte focus:outline-none focus:ring-2 focus:ring-acero/50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {cargando && <Loader2 className="h-5 w-5 animate-spin" />}

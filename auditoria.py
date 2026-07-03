@@ -70,12 +70,18 @@ def registrar_auditoria(
     IMPORTANTE: llamala DESPUÉS de confirmar (commit) la acción principal. Así,
     aunque el log no llegara a guardarse, la acción real ya está persistida.
     """
-    # Leemos el id del usuario ANTES de abrir la sesión del log. Es un simple
-    # int; si el objeto estuviera "expirado" por un commit previo del endpoint,
-    # este acceso podría recargarlo, pero todo está dentro del try y un fallo se
-    # captura sin romper nada.
-    db = SessionLocal()
+    # db arranca en None y la sesión se abre DENTRO del try: así, si hasta la
+    # propia creación de la sesión fallara (rarísimo, pero posible), también se
+    # captura y el contrato de "NUNCA lanza" se cumple en TODOS los caminos.
+    # (Antes SessionLocal() estaba FUERA del try: un fallo justo ahí habría
+    # roto la acción principal, exactamente lo que esta función promete evitar.)
+    db = None
     try:
+        db = SessionLocal()
+        # Leemos el id del usuario: es un simple int; si el objeto estuviera
+        # "expirado" por un commit previo del endpoint, este acceso podría
+        # recargarlo, pero todo está dentro del try y un fallo se captura sin
+        # romper nada.
         usuario_id = usuario.id if usuario is not None else None
 
         # Recortamos el detalle por las dudas, para no exceder la columna.
@@ -101,10 +107,12 @@ def registrar_auditoria(
         # Pase lo que pase, NO rompemos la acción principal. Deshacemos el intento
         # de log en NUESTRA sesión (no afecta la del endpoint) y dejamos el detalle
         # técnico en el log del servidor para poder diagnosticarlo.
-        try:
-            db.rollback()
-        except Exception:
-            logger.exception("Falló el rollback tras un error de auditoría")
+        # (db puede ser None si falló la propia creación de la sesión.)
+        if db is not None:
+            try:
+                db.rollback()
+            except Exception:
+                logger.exception("Falló el rollback tras un error de auditoría")
         logger.exception(
             "No se pudo registrar la auditoría (accion=%s, entidad=%s, entidad_id=%s)",
             accion,
@@ -112,5 +120,7 @@ def registrar_auditoria(
             entidad_id,
         )
     finally:
-        # Cerramos siempre nuestra sesión efímera para liberar la conexión.
-        db.close()
+        # Cerramos siempre nuestra sesión efímera para liberar la conexión
+        # (si llegó a abrirse).
+        if db is not None:
+            db.close()

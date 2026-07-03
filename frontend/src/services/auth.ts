@@ -3,6 +3,7 @@
 // ============================================================
 
 import { API_URL, guardarToken, obtenerToken, limpiarSesion } from "./api";
+import { mensajeDeError } from "./errores";
 
 // Los dos roles que maneja el backend.
 export type Rol = "administrador" | "empleado";
@@ -104,11 +105,24 @@ export function obtenerExpiracionMs(): number | null {
 //  El backend espera los datos como FORMULARIO OAuth2 (no JSON): los campos
 //  username y password en formato x-www-form-urlencoded. Por eso usamos
 //  URLSearchParams (que produce ese formato) en vez de JSON.stringify.
+//
+//  tokenTurnstile (opcional): el token del CAPTCHA de Cloudflare. Solo llega
+//  cuando el CAPTCHA está activo (producción, con VITE_TURNSTILE_SITE_KEY);
+//  viaja como un campo más del formulario con el nombre estándar de Cloudflare
+//  ('cf-turnstile-response'), que es el que espera el backend. En desarrollo
+//  no se manda nada y el backend tampoco lo exige.
 // ------------------------------------------------------------
-export async function login(username: string, password: string): Promise<void> {
+export async function login(
+  username: string,
+  password: string,
+  tokenTurnstile?: string | null
+): Promise<void> {
   const cuerpo = new URLSearchParams();
   cuerpo.set("username", username);
   cuerpo.set("password", password);
+  if (tokenTurnstile) {
+    cuerpo.set("cf-turnstile-response", tokenTurnstile);
+  }
 
   let respuesta: Response;
   try {
@@ -129,8 +143,14 @@ export async function login(username: string, password: string): Promise<void> {
     throw new Error("Usuario o contraseña incorrectos");
   }
   if (!respuesta.ok) {
-    // Cualquier otro error (500, 503...). Mensaje neutro.
-    throw new Error("Ocurrió un error al iniciar sesión. Intenta de nuevo.");
+    // Cualquier otro error. Usamos el detalle del backend cuando existe porque
+    // ahora hay errores del login que el usuario SÍ puede resolver y necesita
+    // distinguir: el 400 del CAPTCHA ("La verificación de seguridad no fue
+    // superada...") y el 503 fail-closed si Cloudflare no responde. Si el
+    // cuerpo no trae detalle (500 raro, proxy...), cae al mensaje neutro.
+    throw new Error(
+      await mensajeDeError(respuesta, "Ocurrió un error al iniciar sesión. Intenta de nuevo.")
+    );
   }
 
   // Respuesta esperada: { "access_token": "...", "token_type": "bearer" }.

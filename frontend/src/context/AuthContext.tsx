@@ -16,7 +16,12 @@ interface ContextoAuth {
   estaAutenticado: boolean;
   rol: auth.Rol | null;
   usuario: string | null; // nombre de usuario (para mostrar en la interfaz)
-  iniciarSesion: (usuario: string, contrasena: string) => Promise<void>;
+  // tokenTurnstile: token del CAPTCHA (solo cuando está activo, en producción).
+  iniciarSesion: (
+    usuario: string,
+    contrasena: string,
+    tokenTurnstile?: string | null
+  ) => Promise<void>;
   cerrarSesion: () => void;
 }
 
@@ -48,10 +53,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [autenticado, cerrarSesion]);
 
-  async function iniciarSesion(usuario: string, contrasena: string): Promise<void> {
+  async function iniciarSesion(
+    usuario: string,
+    contrasena: string,
+    tokenTurnstile?: string | null
+  ): Promise<void> {
     // Si las credenciales son incorrectas, auth.login lanza un error que el
     // componente de login captura para mostrar el mensaje.
-    await auth.login(usuario, contrasena);
+    await auth.login(usuario, contrasena, tokenTurnstile);
     setAutenticado(true);
     setRol(auth.obtenerRol());
     setUsuario(auth.obtenerNombreUsuario());

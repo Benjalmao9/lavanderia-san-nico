@@ -31,3 +31,8 @@ cryptography==49.0.0
 # slowapi: limitador de peticiones (rate limiting) para FastAPI/Starlette. Lo
 # usamos en POST /login para frenar ataques de fuerza bruta de contrasenas.
 slowapi==0.1.9
+
+# httpx: cliente HTTP del lado del servidor. Lo usamos para verificar el token
+# del CAPTCHA (Cloudflare Turnstile) contra la API siteverify en el login de
+# produccion (ver turnstile.py). En desarrollo no se llama nunca.
+httpx==0.28.1
