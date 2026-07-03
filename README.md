@@ -96,6 +96,7 @@ El frontend queda en `http://localhost:5173`.
 | `JWT_SECRET_KEY` | **Siempre** | (64 caracteres aleatorios) | Firma los tokens de login. **Crítica.** Genera una con: `python -c "import secrets; print(secrets.token_urlsafe(64))"`. Usa una distinta en producción. |
 | `JWT_EXPIRE_HOURS` | No (default `2`) | `2` | Horas de vida del token antes de tener que loguearse de nuevo. |
 | `CORS_ORIGINS` | En producción | `https://mi-lavanderia.vercel.app` | Dominios del frontend autorizados (lista separada por comas). Si no está, se permite solo el Vite local. **Nunca uses `*`.** |
+| `TURNSTILE_SECRET_KEY` | En producción | (clave secreta de Cloudflare) | Verifica el CAPTCHA del login (Cloudflare Turnstile). **Solo se usa si `ENTORNO=produccion`** (en desarrollo el CAPTCHA se omite por completo). En producción es obligatoria: sin ella el servidor no arranca. |
 
 Solo para el script `crear_admin.py` (no las usa el servidor):
 `ADMIN_USUARIO`, `ADMIN_CONTRASENA`, `ADMIN_NOMBRE_COMPLETO`.
@@ -105,6 +106,7 @@ Solo para el script `crear_admin.py` (no las usa el servidor):
 | Variable | ¿Requerida? | Ejemplo | Para qué sirve |
 |---|---|---|---|
 | `VITE_API_URL` | Sí | `https://mi-backend.onrender.com` | URL pública del backend. En desarrollo apunta a `http://127.0.0.1:8000`. |
+| `VITE_TURNSTILE_SITE_KEY` | En producción | (site key de Cloudflare) | Clave **pública** del widget de Turnstile: muestra el CAPTCHA en el login. Si no está definida (desarrollo), no se muestra ningún widget. Es la pareja de `TURNSTILE_SECRET_KEY` del backend. |
 
 > Las variables `VITE_*` se incrustan en el build del frontend (son públicas, no
 > secretas). Si cambias `VITE_API_URL`, hay que **volver a hacer el build**.
@@ -140,6 +142,11 @@ Son **tres piezas** y se despliegan en este **orden** (cada una necesita la ante
    - `DATABASE_URL=` (la del Paso 1)
    - `JWT_SECRET_KEY=` (genera una nueva, larga y aleatoria)
    - `CORS_ORIGINS=` (lo completas en el Paso 4, cuando tengas la URL del frontend)
+   - `TURNSTILE_SECRET_KEY=` (clave **secreta** del widget de Cloudflare Turnstile:
+     créalo en [dash.cloudflare.com](https://dash.cloudflare.com) → *Turnstile* →
+     *Add widget*, con el dominio del frontend; te da un par site key / secret key.
+     El CAPTCHA del login solo se activa con `ENTORNO=produccion`, y sin esta
+     variable el servidor no arranca en producción.)
 4. Arranque:
    - **Railway:** detecta Python e instala `requirements.txt`; usa el `Procfile`.
    - **Render:** *Build command* `pip install -r requirements.txt`; *Start command*
@@ -168,7 +175,11 @@ Son **tres piezas** y se despliegan en este **orden** (cada una necesita la ante
 3. Build: comando `npm run build`, salida `dist`. (Vercel autodetecta Vite;
    Netlify lee `netlify.toml`. El *fallback* de rutas SPA ya está configurado en
    `vercel.json` / `netlify.toml`.)
-4. Variable de entorno: `VITE_API_URL=` (la URL del backend del Paso 2).
+4. Variables de entorno:
+   - `VITE_API_URL=` (la URL del backend del Paso 2).
+   - `VITE_TURNSTILE_SITE_KEY=` (la **site key** pública del widget de Turnstile,
+     la pareja de la `TURNSTILE_SECRET_KEY` del Paso 2; con ella el login muestra
+     el CAPTCHA).
 5. Despliega y anota la **URL pública del frontend** (p. ej. `https://mi-lavanderia.vercel.app`).
 
 ### Paso 4 — Conectar CORS (cerrar el círculo)
@@ -198,7 +209,10 @@ Son **tres piezas** y se despliegan en este **orden** (cada una necesita la ante
 
 **Paso 2 — Backend:**
 - [ ] Crear el servicio apuntando al repo (raíz = raíz del repo).
-- [ ] Variables: `ENTORNO=produccion`, `DATABASE_URL`, `JWT_SECRET_KEY`.
+- [ ] Crear el widget de **Cloudflare Turnstile** (dash.cloudflare.com → Turnstile)
+      con el dominio del frontend; copiar el par site key / secret key.
+- [ ] Variables: `ENTORNO=produccion`, `DATABASE_URL`, `JWT_SECRET_KEY`,
+      `TURNSTILE_SECRET_KEY`.
 - [ ] Esperar el deploy y verificar que arranca (los logs no deben mostrar errores
       de `JWT_SECRET_KEY` ni de conexión a la base).
 - [ ] Crear el administrador (`crear_admin.py` contra la base de la nube).
@@ -206,7 +220,8 @@ Son **tres piezas** y se despliegan en este **orden** (cada una necesita la ante
 
 **Paso 3 — Frontend:**
 - [ ] Crear el proyecto con **directorio raíz = `frontend`**.
-- [ ] Variable: `VITE_API_URL` = URL del backend.
+- [ ] Variables: `VITE_API_URL` = URL del backend; `VITE_TURNSTILE_SITE_KEY` =
+      site key del widget de Turnstile.
 - [ ] Desplegar y copiar la URL pública del frontend.
 
 **Paso 4 — Conectar:**
@@ -220,7 +235,9 @@ Son **tres piezas** y se despliegan en este **orden** (cada una necesita la ante
 - **Seguridad ya incluida:** en producción (`ENTORNO=produccion`) se ocultan
   `/docs`/`/redoc`/`/openapi.json`; el backend manda cabeceras de seguridad
   (`X-Frame-Options`, `nosniff`, `Referrer-Policy`); el login tiene *rate limiting*
-  (10 intentos por minuto por IP). El token JWT se firma con `JWT_SECRET_KEY`.
+  (10 intentos por minuto por IP) **y CAPTCHA de Cloudflare Turnstile** (solo en
+  producción; si Cloudflare no responde, el login se rechaza —*fail-closed*— en
+  vez de dejar pasar sin verificación). El token JWT se firma con `JWT_SECRET_KEY`.
 - **El backend no crea las tablas solo:** hay que aplicar `schema.sql` una vez (Paso 1).
 - **Si actualizas `VITE_API_URL`,** vuelve a desplegar el frontend (la URL se
   incrusta en el build).

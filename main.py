@@ -45,6 +45,12 @@ from database import get_db
 # secreta no está bien configurada (ver más abajo).
 from seguridad import validar_configuracion_jwt
 
+# Validación del CAPTCHA (Cloudflare Turnstile): en producción el login lo
+# exige, así que si falta TURNSTILE_SECRET_KEY preferimos no arrancar (mismo
+# criterio de fallo ruidoso y temprano que la clave JWT). En desarrollo el
+# CAPTCHA está apagado y esta validación no exige nada.
+from turnstile import validar_configuracion_turnstile
+
 # requerir_admin: dependencia de autorización para proteger /probar-db (solo admin).
 from dependencias import requerir_admin
 
@@ -94,6 +100,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # crear_admin.py NO pasa por aquí, así que puede correr sin tener JWT
 # configurado (solo usa el hashing de contraseñas).
 validar_configuracion_jwt()
+validar_configuracion_turnstile()
 
 
 # ------------------------------------------------------------
