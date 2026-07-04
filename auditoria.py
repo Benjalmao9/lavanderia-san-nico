@@ -30,13 +30,17 @@
 # ============================================================
 
 import logging
-from datetime import datetime
 from typing import Optional
 
 # SessionLocal: la fábrica de sesiones. Abrimos una sesión EFÍMERA propia para
 # escribir el log, aislada de la sesión del request (ver explicación arriba).
 from database import SessionLocal
 from models import Auditoria, Usuario
+
+# ahora_utc: el instante actual en UTC (naive). TODOS los timestamps del
+# proyecto se guardan en UTC y el frontend los convierte a la hora local del
+# usuario al mostrarlos (ver la explicación completa en tiempo.py).
+from tiempo import ahora_utc
 
 logger = logging.getLogger("lavanderia")
 
@@ -93,13 +97,14 @@ def registrar_auditoria(
             entidad=entidad,
             entidad_id=entidad_id,
             detalle=detalle_seguro,
-            # datetime.now() SIN forzar UTC: hora LOCAL del servidor (convención
-            # de esta tabla desde el principio). OJO: usuarios.sesion_valida_desde
-            # (routers/usuarios.py) sí es explícitamente UTC, para poder
-            # compararse contra el 'iat' del token. Si correlacionás a mano un
-            # registro de esta tabla contra esa marca, tené en cuenta que pueden
-            # no compartir la misma zona horaria.
-            fecha=datetime.now(),
+            # ahora_utc(): UTC, como TODOS los timestamps del proyecto (antes
+            # esta tabla usaba datetime.now() = hora local DEL SERVIDOR, que en
+            # Railway es UTC pero en una laptop es la hora del país: esa
+            # ambigüedad causaba el desfase de 6 horas al mostrarla). Ahora
+            # además es directamente comparable con usuarios.sesion_valida_desde,
+            # que siempre fue UTC. El frontend la recibe marcada con "Z"
+            # (FechaUTC en schemas.py) y la muestra en la hora local del usuario.
+            fecha=ahora_utc(),
         )
         db.add(log)
         db.commit()

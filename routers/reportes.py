@@ -96,6 +96,15 @@ def _aplicar_rango(consulta, fecha_inicio: Optional[date], fecha_fin: Optional[d
     Los pedidos con fecha_recepcion NULL quedan FUERA cuando hay filtro de fechas
     (una comparación con NULL es falsa), lo cual es correcto: sin fecha no
     pertenecen a ningún periodo.
+
+    ZONA HORARIA: fecha_recepcion se guarda EN UTC (ver tiempo.py), así que
+    estos rangos (y los agrupados por día/mes/año con date_format) cortan en la
+    MEDIANOCHE UTC, no en la de México. La comparación es correcta y consistente
+    (ambos lados en UTC); el matiz es que un pedido de las 19:00 de México
+    (01:00 UTC del día siguiente) cuenta para el día UTC siguiente en el
+    reporte. Es el mismo criterio que ya regía en producción. Si algún día se
+    quiere cortar por el día LOCAL del usuario, habría que recibir su zona
+    horaria como parámetro y convertir los límites aquí — no cambiarlo a medias.
     """
     if fecha_inicio is not None:
         consulta = consulta.filter(Pedido.fecha_recepcion >= fecha_inicio)
