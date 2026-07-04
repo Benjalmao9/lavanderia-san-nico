@@ -24,8 +24,10 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 # librería python-multipart (por eso la instalamos).
 from fastapi.security import OAuth2PasswordRequestForm
 
-# El limitador compartido (rate limiting), para frenar la fuerza bruta en /login.
-from limitador import limiter
+# El limitador compartido (rate limiting) para frenar la fuerza bruta en /login,
+# y ip_cliente_real: la IP del cliente resistente a falsificación de
+# X-Forwarded-For (la misma que usa el límite; ver limitador.py).
+from limitador import limiter, ip_cliente_real
 
 from sqlalchemy.orm import Session
 
@@ -47,7 +49,10 @@ from auditoria import registrar_auditoria
 # CAPTCHA de Cloudflare Turnstile, activo SOLO en producción (mismo principio
 # que esconder /docs con ENTORNO: blindajes donde importan, sin estorbar el
 # desarrollo). Ver la explicación completa en turnstile.py.
-from turnstile import es_produccion, verificar_turnstile
+from turnstile import verificar_turnstile
+
+# es_produccion: fuente única del chequeo de entorno (ver entorno.py).
+from entorno import es_produccion
 
 logger = logging.getLogger("lavanderia")
 
@@ -114,10 +119,12 @@ def login(
     #    verificar_turnstile lanza 400 (token ausente/rechazado) o 503
     #    (Cloudflare inalcanzable -> fail-closed; ver turnstile.py).
     if es_produccion():
-        # La IP del cliente es una señal extra para Cloudflare (opcional).
-        # Con --proxy-headers (Procfile), request.client.host ya es la IP real.
-        ip_cliente = request.client.host if request.client else None
-        verificar_turnstile(cf_turnstile_response, ip_cliente)
+        # La IP del cliente es una señal extra para Cloudflare (para detectar
+        # tokens robados/reutilizados desde otra máquina). Usamos ip_cliente_real
+        # (la misma clave que el rate limiter), obtenida de forma resistente a
+        # spoofing de X-Forwarded-For: así Cloudflare recibe la IP REAL y no una
+        # que el atacante pudo inventar (ver limitador.py).
+        verificar_turnstile(cf_turnstile_response, ip_cliente_real(request))
 
     # 1) Buscamos al usuario por su nombre_usuario (lo que viene en 'username'
     #    del formulario OAuth2). Envolvemos la consulta para que un fallo de

@@ -97,6 +97,7 @@ El frontend queda en `http://localhost:5173`.
 | `JWT_EXPIRE_HOURS` | No (default `2`) | `2` | Horas de vida del token antes de tener que loguearse de nuevo. |
 | `CORS_ORIGINS` | En producción | `https://mi-lavanderia.vercel.app` | Dominios del frontend autorizados (lista separada por comas). Si no está, se permite solo el Vite local. **Nunca uses `*`.** |
 | `TURNSTILE_SECRET_KEY` | En producción | (clave secreta de Cloudflare) | Verifica el CAPTCHA del login (Cloudflare Turnstile). **Solo se usa si `ENTORNO=produccion`** (en desarrollo el CAPTCHA se omite por completo). En producción es obligatoria: sin ella el servidor no arranca. |
+| `PROXY_HOPS_CONFIABLES` | No (default `1`) | `1` | Cuántos proxies de confianza hay delante del backend, para obtener la IP real del cliente (`X-Forwarded-For`) al contar el rate limit del login. Railway/Render = `1`. Solo cámbialo si tu plataforma pone más de un proxy delante. |
 
 Solo para el script `crear_admin.py` (no las usa el servidor):
 `ADMIN_USUARIO`, `ADMIN_CONTRASENA`, `ADMIN_NOMBRE_COMPLETO`.
@@ -150,13 +151,17 @@ Son **tres piezas** y se despliegan en este **orden** (cada una necesita la ante
 4. Arranque:
    - **Railway:** detecta Python e instala `requirements.txt`; usa el `Procfile`.
    - **Render:** *Build command* `pip install -r requirements.txt`; *Start command*
-     `uvicorn main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"`.
-     La versión de Python sale de `runtime.txt`.
-   - **`--proxy-headers`** es importante: en Railway/Render tu app corre detrás de un
-     proxy. Sin esa opción, el backend ve la IP del proxy (la misma para todos) y el
-     límite de intentos del login (`/login`) se contaría de forma GLOBAL, pudiendo
-     bloquear el login a todos. Con `--proxy-headers` lee la IP real del cliente. El
-     `Procfile` (que usa Railway) ya la incluye.
+     `uvicorn main:app --host 0.0.0.0 --port $PORT`. La versión de Python sale de
+     `runtime.txt`.
+   - **IP real del cliente detrás del proxy (rate limiting):** en Railway/Render la
+     app corre detrás de un proxy, así que la conexión llega desde la IP del proxy y
+     la del cliente viaja en la cabecera `X-Forwarded-For`. El backend la resuelve
+     **él mismo** de forma resistente a falsificación (toma la última entrada, la que
+     agrega el proxy de confianza; ver `limitador.py`). Por eso el `Procfile` ya **no**
+     usa `--proxy-headers --forwarded-allow-ips="*"`: ese wildcard confiaba en el
+     `X-Forwarded-For` de cualquiera y permitía evadir el límite de fuerza bruta del
+     login rotando la cabecera. Si tu plataforma pusiera más de un proxy delante,
+     ajusta `PROXY_HOPS_CONFIABLES` (por defecto `1`).
    - El `$PORT` lo asigna la plataforma; el `Procfile` ya lo usa.
 5. Crea el administrador en la base de la nube (una vez). Lo más simple desde tu
    laptop, apuntando a la base remota:
