@@ -80,8 +80,11 @@ logger = logging.getLogger("lavanderia")
 # desarrollo, pero en producción es regalarle la superficie de ataque y la
 # estructura interna a cualquier anónimo. Por eso los servimos SOLO fuera de
 # producción: con la variable de entorno ENTORNO=produccion quedan deshabilitados.
-ENTORNO = os.getenv("ENTORNO", "desarrollo")
-_ES_PRODUCCION = ENTORNO.strip().lower() in ("produccion", "production", "prod")
+# es_produccion(): fuente única del chequeo de entorno (ver entorno.py). Lo
+# evaluamos UNA vez al arrancar para decidir docs/HSTS (no cambia en caliente).
+from entorno import es_produccion
+
+_ES_PRODUCCION = es_produccion()
 app = FastAPI(
     docs_url=None if _ES_PRODUCCION else "/docs",
     redoc_url=None if _ES_PRODUCCION else "/redoc",
@@ -228,30 +231,32 @@ async def manejar_error_generico(request: Request, exc: Exception):
     )
 
 
-# Conjunto de nombres de campos cuyo valor NUNCA debe devolverse al cliente.
-# Hoy solo la contraseña en texto plano: cuando UsuarioCrear/UsuarioActualizar
-# validan su longitud (8-72) y falla, Pydantic v2 incluye en el error el campo
-# 'input' con la contraseña plana, que el manejador 422 por defecto de FastAPI
-# reflejaría en la respuesta (y de ahí pasaría a logs de proxy/gateway y a
-# herramientas de observabilidad). Eso contradice el principio del proyecto de
-# no exponer jamás la credencial.
-_CAMPOS_SENSIBLES = {"contrasena"}
-
-
 @app.exception_handler(RequestValidationError)
 async def manejar_error_validacion(request: Request, exc: RequestValidationError):
-    # Reemplazamos el manejador 422 por defecto de FastAPI por uno que sanitiza el
-    # valor ofensor de los campos sensibles. Mantenemos el MISMO formato 422
-    # ({"detail": [...]}) y los mismos mensajes (p. ej. "String should have at
-    # least 8 characters"), solo eliminamos el valor para no filtrar la contraseña.
+    # Reemplazamos el manejador 422 por defecto de FastAPI por uno que NUNCA
+    # refleja el valor que envió el cliente. Mantenemos el MISMO formato
+    # ({"detail": [{loc, msg, type}]}) y los mismos mensajes (p. ej. "String
+    # should have at least 8 characters"); solo eliminamos SIEMPRE 'input' y
+    # 'ctx' de cada error.
+    #
+    # ¿POR QUÉ DE FORMA INCONDICIONAL Y NO SOLO PARA EL CAMPO 'contrasena'?
+    # Porque 'input' arrastra el valor ofensor y, cuando la validación falla a
+    # NIVEL DE CUERPO (p. ej. el cliente manda un arreglo o un texto en vez de un
+    # objeto JSON), Pydantic pone en 'input' el CUERPO ENTERO —con la contraseña
+    # en texto plano incluida— y su 'loc' es ['body'], que NO menciona
+    # 'contrasena'. Un filtro por nombre de campo (como el anterior) no atrapaba
+    # ese caso y la credencial se reflejaba en la respuesta 422 (y de ahí pasaba
+    # a logs de proxy/gateway y herramientas de observabilidad). Al no reflejar
+    # NUNCA datos crudos del cliente cerramos esa fuga y cualquier otra, sin
+    # perder nada útil: 'loc'/'msg'/'type' bastan para que el frontend arme el
+    # mensaje (ver services/errores.ts). Además, quitar 'ctx' evita valores no
+    # serializables que podrían romper la respuesta.
     errores = []
     for err in exc.errors():
         # Copiamos el error para no mutar la estructura interna de la excepción.
         e = dict(err)
-        # Si el 'loc' del error apunta a un campo sensible, quitamos el valor.
-        if any(c in _CAMPOS_SENSIBLES for c in e.get("loc", ())):
-            e.pop("input", None)  # 'input' trae la contraseña en texto plano.
-            e.pop("ctx", None)    # 'ctx' puede arrastrar el valor en otros errores.
+        e.pop("input", None)  # 'input' puede traer el valor/cuerpo crudo del cliente.
+        e.pop("ctx", None)    # 'ctx' puede arrastrar el valor (u objetos no-JSON).
         errores.append(e)
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

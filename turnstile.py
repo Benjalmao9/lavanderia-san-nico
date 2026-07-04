@@ -47,6 +47,10 @@ import httpx
 
 from fastapi import HTTPException, status
 
+# es_produccion: fuente única del chequeo de entorno (ver entorno.py). El CAPTCHA
+# solo se exige/verifica en producción, igual que /docs y el resto de blindajes.
+from entorno import es_produccion
+
 logger = logging.getLogger("lavanderia")
 
 # La API oficial de verificación de Turnstile (server-side).
@@ -59,15 +63,6 @@ _TIMEOUT_SEGUNDOS = 5
 # Largo máximo documentado de un token de Turnstile. Un "token" más largo es
 # basura segura: lo rechazamos nosotros sin gastar una llamada a Cloudflare.
 _MAX_LARGO_TOKEN = 2048
-
-
-def es_produccion() -> bool:
-    """¿Estamos corriendo en producción? (misma normalización que main.py usa
-    para decidir si esconde /docs: acepta 'produccion', 'production' o 'prod',
-    sin importar mayúsculas/espacios). Se lee al MOMENTO de cada llamada (lazy),
-    igual que _obtener_horas_expiracion en seguridad.py."""
-    entorno = os.getenv("ENTORNO", "desarrollo")
-    return entorno.strip().lower() in ("produccion", "production", "prod")
 
 
 def _obtener_clave_secreta() -> str:
