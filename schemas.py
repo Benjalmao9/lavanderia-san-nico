@@ -30,9 +30,9 @@ from typing import Optional, Annotated, Literal
 # sea solo numeros).
 import re
 
-# datetime para fechas+hora; Decimal para montos exactos (sin errores
+# datetime/timezone para fechas+hora; Decimal para montos exactos (sin errores
 # de redondeo de los float), igual que el DECIMAL de MySQL.
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 # BaseModel: clase base de todo esquema de Pydantic.
@@ -40,14 +40,51 @@ from decimal import Decimal
 # Field: para declarar restricciones de valor (gt, ge, max_digits...).
 # StringConstraints: restricciones de texto (strip, min_length, pattern).
 # field_validator: validaciones personalizadas a nivel de campo.
+# PlainSerializer: personaliza CÓMO se convierte un valor al serializar la
+# respuesta a JSON (lo usamos para marcar las fechas como UTC, ver FechaUTC).
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     NaiveDatetime,
+    PlainSerializer,
     StringConstraints,
     field_validator,
 )
+
+
+# ============================================================
+#  FechaUTC: fecha/hora que SALE hacia el frontend marcada como UTC.
+#
+#  El problema que resuelve (bug del desfase de 6 horas): las fechas se
+#  guardan en MySQL como DATETIME "naive" (sin zona horaria) pero SON UTC
+#  (convención del proyecto, ver tiempo.py). Si se serializan tal cual, el
+#  JSON dice "2026-07-03T21:00:00" — sin marca — y el navegador lo interpreta
+#  como si ya fuera hora local del usuario, mostrándolo SIN convertir (6 horas
+#  adelantado para México). Con este tipo, el JSON dice "2026-07-03T21:00:00Z":
+#  la "Z" significa UTC de forma inequívoca (formato ISO 8601), y entonces
+#  new Date(...) en el navegador convierte automáticamente a la hora local
+#  del dispositivo de quien mira (México, o cualquier otro país).
+#
+#  Solo afecta la SALIDA (when_used="json"): las validaciones de entrada y las
+#  comparaciones internas entre datetimes naive siguen exactamente igual.
+# ============================================================
+def _serializar_fecha_utc(dt: datetime) -> str:
+    # Guardamos naive-UTC, así que el caso normal es "colgarle" la marca UTC.
+    # Si alguna vez llegara una fecha CON zona horaria (defensivo), se convierte
+    # a UTC en vez de re-etiquetarla (re-etiquetar cambiaría el instante real).
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    # isoformat() con tz UTC termina en "+00:00"; lo cambiamos por la "Z"
+    # compacta (equivalentes en ISO 8601, y "Z" es lo más estándar en APIs).
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+FechaUTC = Annotated[
+    datetime, PlainSerializer(_serializar_fecha_utc, return_type=str, when_used="json")
+]
 
 
 # ============================================================
@@ -393,10 +430,13 @@ class PedidoActualizar(BaseModel):
     # validación de TRANSICIONES válidas (no saltar/retroceder) vive en el router.
     estado: Optional[Literal["recibido", "en proceso", "listo", "entregado"]] = None
     # NaiveDatetime (sin zona horaria): las fechas del proyecto se guardan naive
-    # (fecha_recepcion la fija el servidor con datetime.now()). Si el cliente
-    # enviara una fecha CON zona horaria (tz-aware), compararla contra una naive en
-    # el router lanzaría TypeError -> 500. Con NaiveDatetime, un valor tz-aware se
-    # rechaza con un 422 claro en vez de reventar. (El frontend no envía esta fecha.)
+    # y SON UTC (convención del proyecto, ver tiempo.py; fecha_recepcion la fija
+    # el servidor con ahora_utc()). Si el cliente enviara una fecha CON zona
+    # horaria (tz-aware), compararla contra una naive en el router lanzaría
+    # TypeError -> 500. Con NaiveDatetime, un valor tz-aware se rechaza con un
+    # 422 claro en vez de reventar. OJO: si algún cliente manda este campo por
+    # la API, el valor se interpreta como UTC, no como hora de México. (El
+    # frontend no envía esta fecha: la fija el servidor al pasar a 'entregado'.)
     fecha_entrega: Optional[NaiveDatetime] = None
     # notas: igual que en PedidoCrear (opcional, hasta 500). Con default None y
     # exclude_unset, omitirla NO la toca (edición parcial); enviarla la cambia, y
@@ -430,8 +470,11 @@ class PedidoRespuesta(BaseModel):
     precio_por_kilo: Decimal
     total: Decimal
     estado: str
-    fecha_recepcion: Optional[datetime] = None
-    fecha_entrega: Optional[datetime] = None
+    # FechaUTC: salen al frontend con la marca "Z" (UTC explícito) para que el
+    # navegador las convierta a la hora local de quien mira. Ver el bloque
+    # FechaUTC arriba y tiempo.py (por qué se guarda en UTC).
+    fecha_recepcion: Optional[FechaUTC] = None
+    fecha_entrega: Optional[FechaUTC] = None
     usuario_id: Optional[int] = None
     notas: Optional[str] = None
 
@@ -452,7 +495,10 @@ class AuditoriaRespuesta(BaseModel):
     entidad: Optional[str] = None
     entidad_id: Optional[int] = None
     detalle: Optional[str] = None
-    fecha: datetime
+    # FechaUTC: sale con la marca "Z" para que el navegador la muestre en la
+    # hora local del usuario (era el desfase de 6 horas que se veía en la
+    # pantalla de Auditoría). Ver el bloque FechaUTC arriba.
+    fecha: FechaUTC
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -12,7 +12,9 @@
 #  paso de login/JWT. Aquí solo dejamos el CRUD con hashing funcionando.
 # ============================================================
 
-from datetime import datetime, timezone
+# ahora_utc: instante actual en UTC (naive), la convención de TODOS los
+# timestamps del proyecto (ver tiempo.py). Acá marca el corte de sesiones.
+from tiempo import ahora_utc
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -382,11 +384,11 @@ def cerrar_sesiones(
 
     # "Naive-UTC" (sin tzinfo) a propósito: así se compara directo contra el
     # 'iat' del token, que también se reconstruye en UTC (ver dependencias.py).
-    # OJO: esto es DISTINTO de fecha en Auditoria (más abajo), que usa
-    # datetime.now() SIN forzar UTC (hora local del servidor). Si comparás esta
-    # marca contra el timestamp de un registro de auditoría a mano, tené en
-    # cuenta que pueden no compartir la misma zona horaria.
-    usuario.sesion_valida_desde = datetime.now(timezone.utc).replace(tzinfo=None)
+    # ahora_utc() es exactamente eso (datetime.now(timezone.utc) sin tzinfo);
+    # desde el fix de zonas horarias, TODOS los timestamps del proyecto
+    # (auditoría y pedidos incluidos) usan esta misma convención UTC, así que
+    # esta marca ya es directamente comparable con cualquier otra del sistema.
+    usuario.sesion_valida_desde = ahora_utc()
 
     try:
         db.commit()

@@ -8,8 +8,10 @@
 #  entidad (pedidos, usuarios, insumos...) tiene su propio archivo.
 # ============================================================
 
-# datetime para la fecha/hora de recepción.
-from datetime import datetime
+# ahora_utc: instante actual en UTC (naive) para fecha_recepcion/fecha_entrega.
+# TODO timestamp del proyecto se guarda en UTC; el frontend lo convierte a la
+# hora local del usuario al mostrarlo (ver la explicación en tiempo.py).
+from tiempo import ahora_utc
 
 # Decimal y ROUND_HALF_UP para calcular el total con dinero de forma
 # exacta y redondearlo a 2 decimales (como el DECIMAL(10,2) de MySQL).
@@ -175,7 +177,7 @@ def crear_pedido(
         precio_por_kilo=datos.precio_por_kilo,
         total=total,                       # calculado, no recibido
         estado="recibido",                 # estado inicial
-        fecha_recepcion=datetime.now(),    # momento de la recepción
+        fecha_recepcion=ahora_utc(),       # momento de la recepción (en UTC)
         fecha_entrega=None,                # todavía no se entrega
         notas=datos.notas,                 # observaciones opcionales del usuario
         # Registramos QUIÉN creó el pedido: el id del usuario autenticado.
@@ -317,7 +319,10 @@ def actualizar_pedido(
     #    fecha de entrega en un pedido no entregado sería incoherente.
     if pedido.estado == "entregado":
         if pedido.fecha_entrega is None:
-            pedido.fecha_entrega = datetime.now()
+            # En UTC, igual que fecha_recepcion: así la comparación de
+            # coherencia de arriba (entrega >= recepción) compara peras con
+            # peras, sin importar dónde corra el servidor.
+            pedido.fecha_entrega = ahora_utc()
     else:
         # Cualquier estado que NO sea 'entregado' NO debe tener fecha de entrega.
         # La forzamos a None SIEMPRE (aunque el cliente la haya enviado en este PUT,

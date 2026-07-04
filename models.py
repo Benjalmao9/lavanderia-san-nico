@@ -189,10 +189,12 @@ class Pedido(Base):
     # estado: VARCHAR(30), obligatorio, por defecto 'recibido'.
     estado = Column(String(30), nullable=False, default="recibido")
 
-    # fecha_recepcion: DATETIME, opcional.
+    # fecha_recepcion: DATETIME, opcional. Se guarda EN UTC (naive), como todo
+    # timestamp del proyecto (ver tiempo.py); el frontend la muestra en la hora
+    # local del usuario.
     fecha_recepcion = Column(DateTime, nullable=True)
 
-    # fecha_entrega: DATETIME, opcional (NULL hasta que se entrega).
+    # fecha_entrega: DATETIME, opcional (NULL hasta que se entrega). En UTC.
     fecha_entrega = Column(DateTime, nullable=True)
 
     # usuario_id: clave foránea hacia usuarios(id). Puede ser NULL.
@@ -256,5 +258,6 @@ class Auditoria(Base):
     # fallido). NUNCA contraseñas ni hashes. Opcional.
     detalle = Column(String(255), nullable=True)
 
-    # fecha: momento exacto de la acción. Obligatorio.
+    # fecha: momento exacto de la acción. Obligatorio. Se guarda EN UTC (naive),
+    # como todo timestamp del proyecto (ver tiempo.py).
     fecha = Column(DateTime, nullable=False)
