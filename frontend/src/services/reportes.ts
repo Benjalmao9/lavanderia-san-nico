@@ -85,3 +85,41 @@ export async function reportePedidosPorEmpleado(
   if (!r.ok) throw new Error(await mensajeDeError(r, "No se pudieron cargar los pedidos por empleado."));
   return r.json();
 }
+
+// GET /reportes/exportar -> descarga el reporte contable en Excel (.xlsx).
+//
+// Es una descarga BINARIA autenticada, así que no sirve un <a href> normal (no
+// llevaría el token). El patrón: pedimos con apiFetch (que agrega el
+// "Authorization: Bearer ..." y maneja el 401 global), leemos el cuerpo como
+// BLOB, y disparamos la descarga con una URL temporal + un <a download> que
+// clicamos por código. El nombre lo sugiere el backend en Content-Disposition
+// (que la API expone en CORS); si no llegara, usamos un fallback con el rango.
+export async function exportarReportesExcel(
+  fechaInicio: string,
+  fechaFin: string,
+  agrupacion: Agrupacion
+): Promise<void> {
+  const q = construirQuery({ fecha_inicio: fechaInicio, fecha_fin: fechaFin, agrupacion });
+  const r = await apiFetch(`/reportes/exportar${q}`);
+  if (!r.ok) {
+    // Ante un error el cuerpo es JSON ({detail}), no el .xlsx: mensajeDeError lo lee.
+    throw new Error(await mensajeDeError(r, "No se pudo generar el archivo de Excel."));
+  }
+
+  const blob = await r.blob();
+
+  // Nombre de archivo sugerido por el backend (o fallback con el rango).
+  const disposition = r.headers.get("Content-Disposition") ?? "";
+  const match = /filename="?([^"]+)"?/.exec(disposition);
+  const nombre = match?.[1] ?? `reporte_lavanderia_${fechaInicio}_a_${fechaFin}.xlsx`;
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Liberamos la URL temporal para no dejar el blob en memoria.
+  URL.revokeObjectURL(url);
+}

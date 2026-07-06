@@ -149,6 +149,12 @@ app.add_middleware(
     # preflight OPTIONS; las cabeceras, el token (Authorization) y el JSON.
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
+    # expose_headers: por defecto el navegador solo deja al JS del frontend leer
+    # unas pocas cabeceras "simples" de la respuesta. Content-Disposition NO es
+    # una de ellas, así que sin esto la descarga del Excel (GET /reportes/exportar)
+    # no podría leer el nombre de archivo sugerido por el backend cuando el
+    # frontend corre en OTRO origen (producción: Vercel vs Railway).
+    expose_headers=["Content-Disposition"],
 )
 
 

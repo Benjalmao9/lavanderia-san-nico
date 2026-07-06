@@ -36,3 +36,8 @@ slowapi==0.1.9
 # del CAPTCHA (Cloudflare Turnstile) contra la API siteverify en el login de
 # produccion (ver turnstile.py). En desarrollo no se llama nunca.
 httpx==0.28.1
+
+# openpyxl: genera archivos Excel (.xlsx) con tablas y graficos NATIVOS. Lo usa
+# el endpoint GET /reportes/exportar (ver reporte_excel.py) para el reporte
+# contable descargable del Panel.
+openpyxl==3.1.5
