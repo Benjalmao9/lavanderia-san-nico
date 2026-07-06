@@ -25,12 +25,21 @@
 // ============================================================
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Wallet, ClipboardList, Truck, AlertTriangle, AlertCircle } from "lucide-react";
+import {
+  Wallet,
+  ClipboardList,
+  Truck,
+  AlertTriangle,
+  AlertCircle,
+  FileSpreadsheet,
+  Loader2,
+} from "lucide-react";
 import {
   reporteIngresos,
   reportePedidosPorPeriodo,
   reportePedidosPorEstado,
   reportePedidosPorEmpleado,
+  exportarReportesExcel,
 } from "../services/reportes";
 import type {
   Agrupacion,
@@ -115,6 +124,34 @@ export default function PanelPage() {
   const [graficas, setGraficas] = useState<DatosGraficas | null>(null);
   const [cargandoGraficas, setCargandoGraficas] = useState(true);
   const [errorGraficas, setErrorGraficas] = useState<string | null>(null);
+
+  // Exportación a Excel (usa el MISMO rango/agrupación del selector). Como puede
+  // tardar un par de segundos (generar el .xlsx con sus gráficos), mostramos un
+  // estado "Generando..." y manejamos el error con un mensaje claro.
+  const [exportando, setExportando] = useState(false);
+  const [errorExport, setErrorExport] = useState<string | null>(null);
+
+  async function exportarExcel() {
+    setErrorExport(null);
+    // Mismas validaciones que las gráficas: ambas fechas y rango correcto (así el
+    // backend no responde un 422/400 y el usuario ve un aviso entendible).
+    if (!fechaInicio || !fechaFin) {
+      setErrorExport("Elige una fecha de inicio y una de fin para exportar.");
+      return;
+    }
+    if (fechaInicio > fechaFin) {
+      setErrorExport("La fecha de inicio no puede ser posterior a la de fin.");
+      return;
+    }
+    setExportando(true);
+    try {
+      await exportarReportesExcel(fechaInicio, fechaFin, agrupacion);
+    } catch (err) {
+      setErrorExport(err instanceof Error ? err.message : "No se pudo exportar a Excel.");
+    } finally {
+      setExportando(false);
+    }
+  }
 
   // Carga de las MÉTRICAS (foto actual, no depende del selector).
   const cargarMetricas = useCallback(async () => {
@@ -260,15 +297,38 @@ export default function PanelPage() {
       <div className="mt-8">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <h2 className="text-lg font-semibold text-slate-100">Reportes</h2>
-          <SelectorPeriodo
-            fechaInicio={fechaInicio}
-            fechaFin={fechaFin}
-            agrupacion={agrupacion}
-            onFechaInicio={setFechaInicio}
-            onFechaFin={setFechaFin}
-            onAgrupacion={setAgrupacion}
-          />
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <SelectorPeriodo
+              fechaInicio={fechaInicio}
+              fechaFin={fechaFin}
+              agrupacion={agrupacion}
+              onFechaInicio={setFechaInicio}
+              onFechaFin={setFechaFin}
+              onAgrupacion={setAgrupacion}
+            />
+            {/* Exportar a Excel: solo admin (toda esta pantalla lo es). Usa el
+                rango y la agrupación actuales del selector. */}
+            <button
+              onClick={exportarExcel}
+              disabled={exportando}
+              className="flex items-center justify-center gap-2 rounded-lg bg-acero px-4 py-2 text-sm font-medium text-white transition hover:bg-acero-fuerte disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {exportando ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="h-4 w-4" />
+              )}
+              {exportando ? "Generando..." : "Exportar a Excel"}
+            </button>
+          </div>
         </div>
+
+        {/* Error de la exportación (aparte del error de las gráficas). */}
+        {errorExport && (
+          <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+            {errorExport}
+          </p>
+        )}
 
         <div className="mt-4">
           {errorGraficas ? (
