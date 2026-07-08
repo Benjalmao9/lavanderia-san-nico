@@ -25,6 +25,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Wallet,
   ClipboardList,
@@ -119,6 +120,8 @@ function CajaError({ mensaje, onReintentar }: { mensaje: string; onReintentar: (
 }
 
 export default function PanelPage() {
+  const navigate = useNavigate();
+
   // Selector de periodo: por defecto, el MES ACTUAL agrupado por DÍA, así al
   // entrar ya hay datos sin configurar nada.
   const [fechaInicio, setFechaInicio] = useState(primerDiaMesISO());
@@ -314,24 +317,31 @@ export default function PanelPage() {
                   icono={Wallet}
                   secundario="Mes en curso"
                 />
+                {/* Clickeable -> Pedidos (todos, sin filtro de estado). */}
                 <MetricaCard
                   titulo="Total de pedidos"
                   valor={formatearNumero(metricas.totalPedidos, 0)}
                   icono={ClipboardList}
-                  secundario="Histórico"
+                  secundario="Histórico · ver todos"
+                  onClick={() => navigate("/pedidos")}
                 />
+                {/* Clickeable -> Pedidos filtrado a los pendientes de entrega
+                    (todo lo que NO está 'entregado', igual que esta métrica). */}
                 <MetricaCard
                   titulo="Por entregar"
                   valor={formatearNumero(metricas.porEntregar, 0)}
                   icono={Truck}
                   secundario="Pedidos no entregados"
+                  onClick={() => navigate("/pedidos?estado=pendientes")}
                 />
+                {/* Clickeable -> Inventario mostrando solo los insumos en alerta. */}
                 <MetricaCard
                   titulo="Alertas de stock"
                   valor={formatearNumero(metricas.alertas, 0)}
                   icono={AlertTriangle}
                   secundario="Insumos bajo el mínimo"
                   acento={metricas.alertas > 0 ? "ambar" : "acero"}
+                  onClick={() => navigate("/inventario?filtro=stock-bajo")}
                 />
               </>
             )}
