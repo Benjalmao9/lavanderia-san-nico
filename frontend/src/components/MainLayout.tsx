@@ -20,10 +20,11 @@
 //  en móvil, para que el foco con teclado no se vaya a controles fuera de pantalla.
 // ============================================================
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { Outlet } from "react-router-dom";
 import { Menu } from "lucide-react";
 import Sidebar from "./Sidebar";
+import CargandoPagina from "./CargandoPagina";
 
 // Punto de corte (lg de Tailwind = 1024px): a partir de acá es "escritorio".
 const CONSULTA_ESCRITORIO = "(min-width: 1024px)";
@@ -136,7 +137,12 @@ export default function MainLayout() {
         inert={drawerMovilAbierto}
         className="min-h-screen p-4 sm:p-6 lg:ml-16 lg:p-8"
       >
-        <Outlet />
+        {/* <Suspense>: mientras una pantalla cargada de forma perezosa (ver App)
+            descarga su chunk, mostramos el fallback en vez de una pantalla en
+            blanco. Este único límite cubre todas las rutas de adentro. */}
+        <Suspense fallback={<CargandoPagina />}>
+          <Outlet />
+        </Suspense>
       </main>
     </div>
   );

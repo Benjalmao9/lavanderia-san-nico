@@ -18,20 +18,32 @@
 //  AMBAS son protección de INTERFAZ (para no mostrar lo que no corresponde).
 //  La SEGURIDAD REAL está en el backend: cada endpoint exige el token y el rol
 //  adecuado y responde 401/403. El frontend nunca es la barrera de seguridad.
+//
+//  CARGA PEREZOSA (code splitting): las pantallas de adentro se importan con
+//  React.lazy, así cada una queda en su propio "chunk" que el navegador descarga
+//  SOLO cuando se entra a esa ruta. Lo importante: el Panel arrastra Recharts
+//  (pesado), y con esto quien entra directo a Login/Pedidos ya NO paga ese costo
+//  en el bundle inicial. LoginPage se deja SIN lazy (import normal) a propósito:
+//  es lo primero que ve quien no tiene sesión, y así no parpadea el fallback.
+//  El límite <Suspense> que muestra el fallback mientras baja el chunk vive en
+//  MainLayout (envuelve el <Outlet>).
 // ============================================================
 
+import { lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminRoute from "./components/AdminRoute";
 import MainLayout from "./components/MainLayout";
 import LoginPage from "./pages/LoginPage";
-import PanelPage from "./pages/PanelPage";
-import PedidosPage from "./pages/PedidosPage";
-import InventarioPage from "./pages/InventarioPage";
-import CategoriasPage from "./pages/CategoriasPage";
-import UsuariosPage from "./pages/UsuariosPage";
-import AuditoriaPage from "./pages/AuditoriaPage";
+
+// Pantallas autenticadas: cargadas de forma perezosa (cada una es su propio chunk).
+const PanelPage = lazy(() => import("./pages/PanelPage"));
+const PedidosPage = lazy(() => import("./pages/PedidosPage"));
+const InventarioPage = lazy(() => import("./pages/InventarioPage"));
+const CategoriasPage = lazy(() => import("./pages/CategoriasPage"));
+const UsuariosPage = lazy(() => import("./pages/UsuariosPage"));
+const AuditoriaPage = lazy(() => import("./pages/AuditoriaPage"));
 
 // La ruta /login: si el usuario ya tiene sesión, no tiene sentido mostrar el
 // login otra vez, así que lo mandamos al inicio.
