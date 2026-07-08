@@ -10,6 +10,13 @@ import { mensajeDeError } from "./errores";
 
 export type Agrupacion = "dia" | "mes" | "anio";
 
+// Límites de fecha válidos para pedir reportes (desde el pedido más antiguo
+// hasta hoy). Los calcula el backend; el selector los usa como min/max.
+export interface RangoValido {
+  fecha_min: string; // YYYY-MM-DD (pedido más antiguo, o hoy si no hay pedidos)
+  fecha_max: string; // YYYY-MM-DD (hoy)
+}
+
 // Filas que devuelve cada reporte. 'ingresos' puede venir como number o string
 // (el Decimal del backend), así que lo tratamos con Number() al graficar.
 export interface IngresoPeriodo {
@@ -38,6 +45,15 @@ function construirQuery(params: Record<string, string | undefined>): string {
   }
   const s = q.toString();
   return s ? `?${s}` : "";
+}
+
+// GET /reportes/rango-valido -> límites de fecha con sentido para el selector
+// (del pedido más antiguo a hoy). Así el frontend NO adivina ni hardcodea un
+// valor mágico: los pone como min/max de los inputs de fecha.
+export async function rangoValidoReportes(): Promise<RangoValido> {
+  const r = await apiFetch("/reportes/rango-valido");
+  if (!r.ok) throw new Error(await mensajeDeError(r, "No se pudo obtener el rango de fechas."));
+  return r.json();
 }
 
 // GET /reportes/ingresos -> suma de ingresos por periodo (depende de fechas + agrupación).

@@ -40,6 +40,7 @@ import {
   reportePedidosPorEstado,
   reportePedidosPorEmpleado,
   exportarReportesExcel,
+  rangoValidoReportes,
 } from "../services/reportes";
 import type {
   Agrupacion,
@@ -74,6 +75,15 @@ function primerDiaMesISO(): string {
   const d = new Date();
   return aISO(new Date(d.getFullYear(), d.getMonth(), 1));
 }
+// Acota una fecha (YYYY-MM-DD) dentro de [min, max]. Como el formato ISO ordena
+// igual que el texto, comparar strings alcanza (no hace falta parsear a Date).
+function clampFecha(f: string, min: string | null, max: string | null): string {
+  if (min && f < min) return min;
+  if (max && f > max) return max;
+  return f;
+}
+const maxFecha = (a: string, b: string) => (a >= b ? a : b);
+const minFecha = (a: string, b: string) => (a <= b ? a : b);
 
 interface Metricas {
   ingresosMes: number;
@@ -125,6 +135,12 @@ export default function PanelPage() {
   const [cargandoGraficas, setCargandoGraficas] = useState(true);
   const [errorGraficas, setErrorGraficas] = useState<string | null>(null);
 
+  // Rango de fechas VÁLIDO (del pedido más antiguo a hoy). Lo trae el backend
+  // (/reportes/rango-valido) para poner min/max en el selector, sin hardcodear.
+  // null = todavía no resuelto; 'min' puede ser null si la consulta falló
+  // (fallback permisivo: el backend igual revalida el rango en cada request).
+  const [rango, setRango] = useState<{ min: string | null; max: string } | null>(null);
+
   // Exportación a Excel (usa el MISMO rango/agrupación del selector). Como puede
   // tardar un par de segundos (generar el .xlsx con sus gráficos), mostramos un
   // estado "Generando..." y manejamos el error con un mensaje claro.
@@ -153,13 +169,39 @@ export default function PanelPage() {
     }
   }
 
-  // Carga de las MÉTRICAS (foto actual, no depende del selector).
+  // Carga el RANGO válido de fechas (del backend) y, con él, acota los valores
+  // del selector para que nunca queden fuera de [min, max].
+  const cargarRango = useCallback(async () => {
+    try {
+      const r = await rangoValidoReportes();
+      setRango({ min: r.fecha_min, max: r.fecha_max });
+      // Acotamos los valores actuales del selector al rango válido (si ya estaban
+      // dentro, setState con el mismo valor no dispara re-render ni recarga).
+      setFechaInicio((f) => clampFecha(f, r.fecha_min, r.fecha_max));
+      setFechaFin((f) => clampFecha(f, r.fecha_min, r.fecha_max));
+    } catch {
+      // Si no se pudo obtener el rango, seguimos sin límite inferior y con el
+      // máximo = hoy del dispositivo. El backend igual valida, así que la
+      // barrera real no se pierde.
+      setRango({ min: null, max: hoyISO() });
+    }
+  }, []);
+
+  // Carga de las MÉTRICAS (foto actual, no depende del selector). Espera a
+  // conocer el rango válido para acotar el mes en curso dentro de [min, max]:
+  // así "Ingresos del mes" no pide una fecha que el backend rechazaría (p. ej.
+  // si el negocio abrió a mitad de mes y no hay pedidos desde el día 1).
   const cargarMetricas = useCallback(async () => {
+    if (!rango) return; // se vuelve a disparar cuando 'rango' se resuelve
     setCargandoMetricas(true);
     setErrorMetricas(null);
     try {
+      const inicioMes = rango.min
+        ? maxFecha(primerDiaMesISO(), rango.min)
+        : primerDiaMesISO();
+      const finMes = minFecha(hoyISO(), rango.max);
       const [ingresosMes, porEstado, alertas] = await Promise.all([
-        reporteIngresos(primerDiaMesISO(), hoyISO(), "mes"),
+        reporteIngresos(inicioMes, finMes, "mes"),
         reportePedidosPorEstado(), // sin rango = histórico completo
         insumosEnAlerta(),
       ]);
@@ -180,7 +222,7 @@ export default function PanelPage() {
     } finally {
       setCargandoMetricas(false);
     }
-  }, []);
+  }, [rango]);
 
   // Contador de cargas, para descartar respuestas OBSOLETAS. Si el usuario
   // cambia el selector rápido, hay varias cargas en vuelo; cada una toma un id y,
@@ -233,7 +275,11 @@ export default function PanelPage() {
     }
   }, [fechaInicio, fechaFin, agrupacion]);
 
-  // Las métricas se cargan una vez; las gráficas, cada vez que cambia el selector.
+  // El rango válido se pide una vez al montar; las métricas se cargan cuando el
+  // rango se resuelve; las gráficas, cada vez que cambia el selector.
+  useEffect(() => {
+    cargarRango();
+  }, [cargarRango]);
   useEffect(() => {
     cargarMetricas();
   }, [cargarMetricas]);
@@ -305,6 +351,8 @@ export default function PanelPage() {
               onFechaInicio={setFechaInicio}
               onFechaFin={setFechaFin}
               onAgrupacion={setAgrupacion}
+              min={rango?.min ?? undefined}
+              max={rango?.max}
             />
             {/* Exportar a Excel: solo admin (toda esta pantalla lo es). Usa el
                 rango y la agrupación actuales del selector. */}
