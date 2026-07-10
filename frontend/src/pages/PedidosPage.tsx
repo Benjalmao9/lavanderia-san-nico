@@ -22,6 +22,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Plus,
   Search,
@@ -43,8 +44,25 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import Modal from "../components/Modal";
 import { formatearMoneda, formatearNumero, formatearFecha } from "../utils/formato";
 
-// Opciones del filtro por estado ("todos" + los estados conocidos).
-const ESTADOS_FILTRO = ["todos", "recibido", "en proceso", "listo", "entregado"];
+// Opciones del filtro por estado. "pendientes" es un PSEUDO-estado (todo lo que
+// NO está 'entregado'): lo usa el atajo "Por entregar" del Panel, que llega con
+// ?estado=pendientes. El resto son los estados reales.
+const ESTADOS_FILTRO = ["todos", "pendientes", "recibido", "en proceso", "listo", "entregado"];
+
+// ¿El pedido (según su estado) coincide con el filtro elegido? Centralizado para
+// que la lista y el aviso de "salió del filtro" usen EXACTAMENTE el mismo criterio.
+function coincideEstadoFiltro(estado: string, filtro: string): boolean {
+  if (filtro === "todos") return true;
+  if (filtro === "pendientes") return estado !== "entregado";
+  return estado === filtro;
+}
+
+// Etiqueta legible de cada opción del filtro.
+function etiquetaFiltro(filtro: string): string {
+  if (filtro === "todos") return "Todos los estados";
+  if (filtro === "pendientes") return "Pendientes de entrega";
+  return filtro;
+}
 
 export default function PedidosPage() {
   // Datos y estados de carga.
@@ -52,9 +70,31 @@ export default function PedidosPage() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filtros (solo en el frontend).
+  // Filtros (solo en el frontend). El filtro por estado se INICIALIZA desde el
+  // query param ?estado=... de la URL (así el atajo del Panel llega ya filtrado y
+  // el link sobrevive un refresh). Si no viene o es inválido, "todos".
+  const [searchParams, setSearchParams] = useSearchParams();
   const [busqueda, setBusqueda] = useState("");
-  const [filtroEstado, setFiltroEstado] = useState("todos");
+  const [filtroEstado, setFiltroEstado] = useState(() => {
+    const e = searchParams.get("estado");
+    return e && ESTADOS_FILTRO.includes(e) ? e : "todos";
+  });
+
+  // Cambiar el filtro desde el <select>: actualiza el estado Y refleja el valor
+  // en la URL (link compartible), quitando el parámetro cuando es el default.
+  function cambiarFiltroEstado(nuevo: string) {
+    setFiltroEstado(nuevo);
+    setAvisoEstado(null); // el aviso de "salió del filtro" ya no aplica
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (nuevo === "todos") p.delete("estado");
+        else p.set("estado", nuevo);
+        return p;
+      },
+      { replace: true }
+    );
+  }
 
   // Modal de formulario: null = cerrado, "nuevo" = crear, objeto = editar.
   const [modal, setModal] = useState<"nuevo" | Pedido | null>(null);
@@ -103,8 +143,7 @@ export default function PedidosPage() {
     const coincideCliente = p.cliente
       .toLowerCase()
       .includes(busqueda.trim().toLowerCase());
-    const coincideEstado = filtroEstado === "todos" || p.estado === filtroEstado;
-    return coincideCliente && coincideEstado;
+    return coincideCliente && coincideEstadoFiltro(p.estado, filtroEstado);
   });
 
   // Actualización SILENCIOSA tras un cambio rápido de estado: reemplazamos ese
@@ -119,8 +158,8 @@ export default function PedidosPage() {
       // coincide, su fila desaparece de la lista: lo avisamos (si coincide, se
       // limpia cualquier aviso previo).
       setAvisoEstado(
-        filtroEstado !== "todos" && actualizado.estado !== filtroEstado
-          ? `El pedido #${actualizado.id} pasó a “${actualizado.estado}” y ya no coincide con el filtro “${filtroEstado}”.`
+        !coincideEstadoFiltro(actualizado.estado, filtroEstado)
+          ? `El pedido #${actualizado.id} pasó a “${actualizado.estado}” y ya no coincide con el filtro “${etiquetaFiltro(filtroEstado)}”.`
           : null
       );
     },
@@ -176,15 +215,12 @@ export default function PedidosPage() {
         </div>
         <select
           value={filtroEstado}
-          onChange={(e) => {
-            setFiltroEstado(e.target.value);
-            setAvisoEstado(null); // el aviso de "salió del filtro" ya no aplica
-          }}
+          onChange={(e) => cambiarFiltroEstado(e.target.value)}
           className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm capitalize text-slate-200 outline-none transition focus:border-acero"
         >
           {ESTADOS_FILTRO.map((s) => (
             <option key={s} value={s}>
-              {s === "todos" ? "Todos los estados" : s}
+              {etiquetaFiltro(s)}
             </option>
           ))}
         </select>

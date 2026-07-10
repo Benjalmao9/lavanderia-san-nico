@@ -43,6 +43,10 @@ from schemas import (
 )
 from dependencias import requerir_admin
 
+# ahora_utc: instante actual en UTC (naive). Lo usamos para calcular "hoy" al
+# validar los límites de fecha de los reportes (ver _limites_validos).
+from tiempo import ahora_utc
+
 # Generador del archivo Excel (5 pestañas con tablas + gráficos nativos). Recibe
 # los datos ya consultados; no toca la base (ver reporte_excel.py).
 from reporte_excel import construir_reporte_excel
@@ -80,6 +84,54 @@ def _validar_rango(fecha_inicio: Optional[date], fecha_fin: Optional[date]) -> N
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="fecha_inicio no puede ser posterior a fecha_fin",
         )
+
+
+def _limites_validos(db) -> tuple[date, date]:
+    """Rango de fechas con SENTIDO para un reporte: (fecha_min, fecha_max).
+
+    - fecha_max = HOY: no tiene sentido un reporte "del futuro".
+    - fecha_min = fecha del pedido MÁS ANTIGUO (MIN(fecha_recepcion)), o HOY si
+      todavía no hay ningún pedido (fallback razonable). Así el límite inferior
+      sale de datos REALES, sin un valor mágico hardcodeado que envejezca.
+
+    'Hoy' se toma en UTC (ahora_utc), coherente con que las fechas se guardan en
+    UTC. Como los usuarios están en México (UTC-6, DETRÁS de UTC), su 'hoy' local
+    nunca es posterior a este 'hoy', así que no hay rechazos falsos por el límite
+    del día. Puede lanzar SQLAlchemyError (el llamador lo traduce a 503).
+    """
+    hoy = ahora_utc().date()
+    mas_antiguo = db.query(func.min(Pedido.fecha_recepcion)).scalar()
+    fecha_min = mas_antiguo.date() if mas_antiguo is not None else hoy
+    return fecha_min, hoy
+
+
+def _validar_limites(db, fecha_inicio: Optional[date], fecha_fin: Optional[date]) -> None:
+    """Rechaza (400) un rango fuera de los límites reales del negocio: una fecha
+    FUTURA (posterior a hoy) o ANTERIOR al pedido más antiguo. Es la MISMA barrera
+    que el frontend muestra en el selector, reforzada acá (el frontend nunca es la
+    única barrera: el request se puede mandar directo por curl). Solo valida las
+    fechas que vengan con valor; si el rango es totalmente abierto (ambas None,
+    p. ej. el histórico de las tarjetas), no hay nada que validar y así evitamos
+    una consulta innecesaria a la base."""
+    if fecha_inicio is None and fecha_fin is None:
+        return
+    fecha_min, fecha_max = _limites_validos(db)
+    for etiqueta, f in (("fecha_inicio", fecha_inicio), ("fecha_fin", fecha_fin)):
+        if f is None:
+            continue
+        if f > fecha_max:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{etiqueta} no puede ser una fecha futura (máximo {fecha_max.isoformat()}).",
+            )
+        if f < fecha_min:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"{etiqueta} no puede ser anterior al pedido más antiguo "
+                    f"({fecha_min.isoformat()})."
+                ),
+            )
 
 
 def _aplicar_rango(consulta, fecha_inicio: Optional[date], fecha_fin: Optional[date]):
@@ -242,6 +294,27 @@ def _consultar_detalle_pedidos(db, fecha_inicio, fecha_fin):
 
 
 # ============================================================
+#  GET /reportes/rango-valido  (SOLO administradores)
+#  Devuelve el rango de fechas con sentido para pedir reportes:
+#      {"fecha_min": "YYYY-MM-DD", "fecha_max": "YYYY-MM-DD"}
+#  El frontend lo usa para poner min/max en el selector de fechas del Panel, en
+#  vez de adivinar o hardcodear un valor mágico. fecha_min = pedido más antiguo
+#  (o hoy si no hay ninguno); fecha_max = hoy.
+# ============================================================
+@router.get("/rango-valido")
+def rango_valido(db: Session = Depends(get_db)):
+    try:
+        fecha_min, fecha_max = _limites_validos(db)
+    except SQLAlchemyError:
+        logger.exception("Error de base de datos al calcular el rango válido de reportes")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Error al acceder a la base de datos",
+        )
+    return {"fecha_min": fecha_min.isoformat(), "fecha_max": fecha_max.isoformat()}
+
+
+# ============================================================
 #  Reporte 1 — GET /reportes/ingresos
 #  Suma de los 'total' por periodo (día/mes/año) dentro de un rango.
 #  Ejemplo (agrupacion=mes): [{periodo:'2026-01', ingresos:5000.00}, ...]
@@ -257,6 +330,8 @@ def reporte_ingresos(
 ):
     _validar_rango(fecha_inicio, fecha_fin)
     try:
+        # Rechaza fechas futuras o anteriores al pedido más antiguo (400).
+        _validar_limites(db, fecha_inicio, fecha_fin)
         # La consulta vive en _consultar_ingresos (la reutiliza también el export).
         # Si el rango no tiene pedidos, devuelve [] (sin romper).
         return _consultar_ingresos(db, fecha_inicio, fecha_fin, agrupacion)
@@ -284,6 +359,7 @@ def reporte_pedidos_por_periodo(
 ):
     _validar_rango(fecha_inicio, fecha_fin)
     try:
+        _validar_limites(db, fecha_inicio, fecha_fin)
         return _consultar_pedidos_por_periodo(db, fecha_inicio, fecha_fin, agrupacion)
     except SQLAlchemyError:
         logger.exception("Error de base de datos en el reporte de pedidos por periodo")
@@ -310,6 +386,7 @@ def reporte_pedidos_por_estado(
 ):
     _validar_rango(fecha_inicio, fecha_fin)
     try:
+        _validar_limites(db, fecha_inicio, fecha_fin)
         return _consultar_pedidos_por_estado(db, fecha_inicio, fecha_fin)
     except SQLAlchemyError:
         logger.exception("Error de base de datos en el reporte de pedidos por estado")
@@ -338,6 +415,7 @@ def reporte_pedidos_por_empleado(
 ):
     _validar_rango(fecha_inicio, fecha_fin)
     try:
+        _validar_limites(db, fecha_inicio, fecha_fin)
         # La consulta (con outerjoin a usuarios y el nombre a mostrar resuelto)
         # vive en _consultar_pedidos_por_empleado, reutilizada por el export.
         return _consultar_pedidos_por_empleado(db, fecha_inicio, fecha_fin)
@@ -370,6 +448,8 @@ def exportar_reportes(
 
     # Reunimos los 5 conjuntos de datos con las MISMAS consultas que la interfaz.
     try:
+        # Rechaza fechas futuras o anteriores al pedido más antiguo (400).
+        _validar_limites(db, fecha_inicio, fecha_fin)
         ingresos = _consultar_ingresos(db, fecha_inicio, fecha_fin, agrupacion)
         por_periodo = _consultar_pedidos_por_periodo(
             db, fecha_inicio, fecha_fin, agrupacion

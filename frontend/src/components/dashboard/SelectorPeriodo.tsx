@@ -16,6 +16,11 @@ interface Props {
   onFechaInicio: (v: string) => void;
   onFechaFin: (v: string) => void;
   onAgrupacion: (v: Agrupacion) => void;
+  // Límites del selector (YYYY-MM-DD): 'min' = pedido más antiguo, 'max' = hoy.
+  // El navegador impide elegir fuera de [min, max] en el datepicker. Son la UX
+  // inmediata; el backend igual revalida (nunca es la única barrera).
+  min?: string;
+  max?: string;
 }
 
 const claseControl =
@@ -28,6 +33,8 @@ export default function SelectorPeriodo({
   onFechaInicio,
   onFechaFin,
   onAgrupacion,
+  min,
+  max,
 }: Props) {
   return (
     <div className="flex flex-wrap items-end gap-3">
@@ -37,6 +44,8 @@ export default function SelectorPeriodo({
           type="date"
           value={fechaInicio}
           onChange={(e) => onFechaInicio(e.target.value)}
+          min={min}
+          max={max}
           className={claseControl}
         />
       </div>
@@ -46,6 +55,8 @@ export default function SelectorPeriodo({
           type="date"
           value={fechaFin}
           onChange={(e) => onFechaFin(e.target.value)}
+          min={min}
+          max={max}
           className={claseControl}
         />
       </div>

@@ -19,6 +19,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Plus,
   Search,
@@ -48,6 +49,30 @@ export default function InventarioPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [busqueda, setBusqueda] = useState("");
+
+  // Filtro "solo stock bajo": se puede activar desde la tarjeta del Panel con
+  // ?filtro=stock-bajo (link compartible / sobrevive un refresh). Reutiliza la
+  // lista de alertas del backend (idsEnAlerta), no duplica la lógica de "qué
+  // está en alerta".
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [soloStockBajo, setSoloStockBajo] = useState(
+    () => searchParams.get("filtro") === "stock-bajo"
+  );
+
+  // Alternar el filtro: actualiza el estado Y refleja el valor en la URL.
+  function alternarStockBajo() {
+    const nuevo = !soloStockBajo;
+    setSoloStockBajo(nuevo);
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (nuevo) p.set("filtro", "stock-bajo");
+        else p.delete("filtro");
+        return p;
+      },
+      { replace: true }
+    );
+  }
 
   const [modal, setModal] = useState<"nuevo" | Insumo | null>(null);
 
@@ -95,10 +120,14 @@ export default function InventarioPage() {
     return mapaCategorias.get(insumo.categoria_id) ?? "—";
   }
 
-  // Filtro por nombre (en el frontend, sobre lo ya cargado).
-  const filtrados = insumos.filter((i) =>
-    i.nombre.toLowerCase().includes(busqueda.trim().toLowerCase())
-  );
+  // Filtro por nombre + (opcional) solo stock bajo. Ambos en el frontend, sobre
+  // lo ya cargado. "Stock bajo" reutiliza idsEnAlerta (la fuente de verdad del
+  // backend sobre qué está en alerta), no una regla duplicada acá.
+  const filtrados = insumos.filter((i) => {
+    const coincideNombre = i.nombre.toLowerCase().includes(busqueda.trim().toLowerCase());
+    const coincideStock = !soloStockBajo || idsEnAlerta.has(i.id);
+    return coincideNombre && coincideStock;
+  });
 
   async function confirmarBorrado() {
     if (!aBorrar) return;
@@ -141,16 +170,33 @@ export default function InventarioPage() {
         </div>
       )}
 
-      {/* Buscador por nombre */}
-      <div className="relative mt-5">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-        <input
-          type="text"
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          placeholder="Buscar por nombre..."
-          className="w-full rounded-lg border border-slate-700 bg-slate-800 py-2 pl-9 pr-3 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-acero focus:ring-2 focus:ring-acero/40 sm:max-w-xs"
-        />
+      {/* Buscador por nombre + filtro "solo stock bajo" */}
+      <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative flex-1 sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+          <input
+            type="text"
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Buscar por nombre..."
+            className="w-full rounded-lg border border-slate-700 bg-slate-800 py-2 pl-9 pr-3 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-acero focus:ring-2 focus:ring-acero/40"
+          />
+        </div>
+        {/* Toggle "solo stock bajo". Activo -> ámbar (coherente con el resalte de
+            alerta); inactivo -> control oscuro normal. */}
+        <button
+          type="button"
+          onClick={alternarStockBajo}
+          aria-pressed={soloStockBajo}
+          className={
+            soloStockBajo
+              ? "flex shrink-0 items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-300 transition"
+              : "flex shrink-0 items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-300 transition hover:bg-slate-700"
+          }
+        >
+          <AlertTriangle className="h-4 w-4" />
+          Solo stock bajo
+        </button>
       </div>
 
       {/* Contenido: cargando / error / vacío / tabla */}
@@ -178,7 +224,9 @@ export default function InventarioPage() {
           </div>
         ) : filtrados.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/40 py-12 text-center text-slate-500">
-            Ningún insumo coincide con la búsqueda.
+            {soloStockBajo
+              ? "No hay insumos con stock bajo que coincidan con la búsqueda."
+              : "Ningún insumo coincide con la búsqueda."}
           </div>
         ) : (
           // Móvil (debajo de lg): TARJETAS; escritorio (lg+): tabla. Misma lista
