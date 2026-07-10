@@ -28,7 +28,7 @@
 #  explícita de UTC se agrega recién al SERIALIZAR hacia el frontend.
 # ============================================================
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 
 def ahora_utc() -> datetime:
@@ -42,3 +42,49 @@ def ahora_utc() -> datetime:
     en MySQL (ver el encabezado del módulo).
     """
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+# ============================================================
+#  "HOY" COMO DÍA CALENDARIO DEL NEGOCIO (no como día UTC).
+#
+#  Todo lo de arriba es sobre INSTANTES que se GUARDAN (siempre en UTC, sin
+#  ambigüedad). Pero "hoy" —para decidir qué fecha es válida en un selector, p.
+#  ej. "no se permiten fechas futuras"— es un concepto DISTINTO: es el DÍA
+#  CALENDARIO que un humano del negocio reconoce, y ese negocio es una
+#  lavandería en Ciudad de México. Offset FIJO UTC-6 porque México ya no
+#  observa horario de verano (desde 2022); mismo criterio que ya usa
+#  reporte_excel.py para el documento contable.
+#
+#  ¿POR QUÉ NO ALCANZA CON ahora_utc().date()? Porque UTC va SIEMPRE ADELANTE
+#  del reloj de México (Ciudad de México = UTC menos 6 horas). Entre las 18:00
+#  y las 23:59 hora de México, el reloj UTC YA marca el día calendario
+#  SIGUIENTE. Si "hoy" se calculara con ahora_utc().date() a secas, durante esa
+#  ventana el sistema consideraría "hoy" un día que, en México, todavía no
+#  llegó — dejando elegir una fecha que para el negocio es del FUTURO (el bug
+#  real: el selector "Hasta" dejaba elegir el día siguiente al actual, hora de
+#  México). Es el mismo patrón que el desfase de 6 horas de las fechas de
+#  pedidos, pero en la dirección de "hoy" en vez de en la de mostrar un
+#  timestamp guardado.
+# ============================================================
+
+# Offset fijo de Ciudad de México (ver el porqué arriba).
+ZONA_MEXICO = timezone(timedelta(hours=-6))
+
+
+def a_zona_mexico(dt: datetime) -> datetime:
+    """Convierte un datetime NAIVE-UTC (como se guarda en la BD) al "reloj de
+    pared" de Ciudad de México, también naive. Es la conversión compartida que
+    usa tanto el Excel contable (reporte_excel.py) como el cálculo de "hoy" de
+    abajo, para no duplicar la zona horaria en dos archivos."""
+    return dt.replace(tzinfo=timezone.utc).astimezone(ZONA_MEXICO).replace(tzinfo=None)
+
+
+def hoy_mexico() -> date:
+    """El DÍA CALENDARIO actual en Ciudad de México (no el día UTC).
+
+    Úsala para cualquier límite tipo "no se permiten fechas futuras" (p. ej. el
+    selector de rango de reportes). NO la uses para timestamps que se guardan
+    (para eso, ahora_utc()): esta función es solo para decidir qué día
+    considera "hoy" un humano del negocio.
+    """
+    return a_zona_mexico(ahora_utc()).date()

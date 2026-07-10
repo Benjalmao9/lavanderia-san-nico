@@ -43,9 +43,11 @@ from schemas import (
 )
 from dependencias import requerir_admin
 
-# ahora_utc: instante actual en UTC (naive). Lo usamos para calcular "hoy" al
-# validar los límites de fecha de los reportes (ver _limites_validos).
-from tiempo import ahora_utc
+# hoy_mexico: el DÍA CALENDARIO actual en Ciudad de México (no el día UTC) — lo
+# usamos para el límite superior de fecha de los reportes. a_zona_mexico: misma
+# conversión, para expresar el pedido MÁS ANTIGUO también como día de México
+# (ver _limites_validos, ambos con la MISMA explicación de fondo).
+from tiempo import hoy_mexico, a_zona_mexico
 
 # Generador del archivo Excel (5 pestañas con tablas + gráficos nativos). Recibe
 # los datos ya consultados; no toca la base (ver reporte_excel.py).
@@ -94,14 +96,26 @@ def _limites_validos(db) -> tuple[date, date]:
       todavía no hay ningún pedido (fallback razonable). Así el límite inferior
       sale de datos REALES, sin un valor mágico hardcodeado que envejezca.
 
-    'Hoy' se toma en UTC (ahora_utc), coherente con que las fechas se guardan en
-    UTC. Como los usuarios están en México (UTC-6, DETRÁS de UTC), su 'hoy' local
-    nunca es posterior a este 'hoy', así que no hay rechazos falsos por el límite
-    del día. Puede lanzar SQLAlchemyError (el llamador lo traduce a 503).
+    AMBOS límites se expresan como DÍA CALENDARIO DE MÉXICO (hoy_mexico /
+    a_zona_mexico), NO como día UTC. Es el mismo tipo de bug que el desfase de
+    6 horas ya documentado del proyecto, aplicado acá a "qué día es hoy" en vez
+    de "a qué hora pasó esto": fecha_recepcion se guarda en UTC, y UTC va
+    SIEMPRE ADELANTE del reloj de México (México = UTC-6). Si tomáramos el día
+    tal cual (ahora_utc().date() / mas_antiguo.date()):
+      - fecha_max quedaría ADELANTADA: entre las 18:00 y las 23:59 hora de
+        México, UTC ya marca el día siguiente, y el selector dejaría elegir
+        una fecha que en México todavía es "mañana" (el bug real que se
+        reportó: el input "Hasta" permitía el día siguiente al actual).
+      - fecha_min quedaría ATRASADA respecto al día real en que se recibió el
+        primer pedido en México, RECHAZANDO por error una fecha que sí
+        corresponde al primer día real de operación (mismo truncamiento UTC,
+        efecto contrario: más estricta de lo debido, no más permisiva).
+    Convertir ambos extremos a día de México corrige los dos casos con la
+    MISMA conversión. Puede lanzar SQLAlchemyError (el llamador lo traduce a 503).
     """
-    hoy = ahora_utc().date()
+    hoy = hoy_mexico()
     mas_antiguo = db.query(func.min(Pedido.fecha_recepcion)).scalar()
-    fecha_min = mas_antiguo.date() if mas_antiguo is not None else hoy
+    fecha_min = a_zona_mexico(mas_antiguo).date() if mas_antiguo is not None else hoy
     return fecha_min, hoy
 
 
