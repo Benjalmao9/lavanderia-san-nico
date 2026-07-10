@@ -29,7 +29,7 @@
 # ============================================================
 
 import io
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 
 from openpyxl import Workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
@@ -37,10 +37,10 @@ from openpyxl.chart import LineChart, BarChart, PieChart, Reference
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-
-# Zona de Ciudad de México: offset FIJO UTC-6 (ver explicación del encabezado:
-# México ya no observa horario de verano, así que -6 es constante).
-_MEXICO = timezone(timedelta(hours=-6))
+# a_zona_mexico: la conversión UTC -> hora de México, COMPARTIDA con el cálculo
+# de "hoy" del negocio en tiempo.py (antes esta zona horaria estaba duplicada
+# acá; centralizarla evita que las dos copias se desalineen).
+from tiempo import a_zona_mexico
 
 # Formatos de celda (códigos de formato de Excel).
 _FMT_MONEDA = '"$"#,##0.00'          # dinero: $1,234.50
@@ -95,10 +95,11 @@ def _a_hora_mexico(dt):
     Devuelve un datetime naive con el "reloj de pared" de México (Excel no guarda
     zona horaria; guarda el valor tal cual y lo muestra igual en cualquier PC).
     None se mantiene como None (fecha ausente, p. ej. un pedido sin entregar).
+    La conversión en sí vive en tiempo.py (compartida con hoy_mexico()).
     """
     if dt is None:
         return None
-    return dt.replace(tzinfo=timezone.utc).astimezone(_MEXICO).replace(tzinfo=None)
+    return a_zona_mexico(dt)
 
 
 def _estilar_encabezado(ws, num_columnas: int, fila: int = 1) -> None:
